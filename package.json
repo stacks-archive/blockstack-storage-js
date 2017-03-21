@@ -1,0 +1,73 @@
+{
+  "name": "blockstack-storage",
+  "version": "0.0.1",
+  "description": "The Blockstack Javascript library for storage.",
+  "main": "lib/index",
+  "scripts": {
+    "browserify": "./node_modules/.bin/browserify lib/index.js --standalone blockstack-storage -o ./lib/blockstack-storage-bundle.js",
+    "compile": "rm -rf lib; babel --presets es2015 src -d lib",
+    "prepublish": "npm run compile",
+    "release": "npm version patch && npm publish",
+    "test": "npm run compile; npm run browserify; node lib/testing/index.js",
+    "browser-test": "npm run compile; npm run browserify; node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jcnelson/blockstack-storage-js.git"
+  },
+  "author": {
+    "name": "Blockstack Inc.",
+    "email": "admin@blockstack.com",
+    "url": "https://blockstack.com"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/jcnelson/blockstack-storage-js/issues"
+  },
+  "keywords": [
+    "blockchain",
+    "bitcoin",
+    "bitcoin storage",
+    "bitcoin scaling",
+    "off-chain storage",
+    "crypto",
+    "cryptography",
+    "blockstack",
+    "blockstack auth",
+    "profile",
+    "identity",
+    "ethereum",
+    "storage",
+    "decentralized"
+  ],
+  "homepage": "https://blockstack.org",
+  "contributors": [
+    {
+      "name": "Jude Nelson"
+    },
+    {
+      "name": "Ryan Shea"
+    },
+    {
+      "name": "Larry Salibra"
+    }
+  ],
+  "devDependencies": {
+    "babel-cli": "^6.4.5",
+    "babel-preset-es2015": "^6.3.13",
+    "blue-tape": "^1.0.0",
+    "browserify": "^13.1.1",
+    "express": "^4.15.0",
+    "fetch-mock": "^5.5.0",
+    "node-fetch": "^1.6.3",
+    "tape": "^4.6.3"
+  },
+  "dependencies": {
+    "bitcoinjs-lib": "^2.3.0",
+    "elliptic": "^6.4.0",
+    "jsontokens": "^0.7.4",
+    "sprintf-js": "^1.0.3",
+    "schema-inspector": "^1.6.4",
+    "uuid": "^3.0.1"
+  }
+}
