@@ -2,6 +2,8 @@
 
 import inspector from 'schema-inspector';
 import {
+   MUTABLE_DATUM_DIR_TYPE,
+   MUTABLE_DATUM_FILE_TYPE,
    DATASTORE_SCHEMA,
    MUTABLE_DATUM_INODE_SCHEMA,
    MUTABLE_DATUM_DIR_IDATA_SCHEMA,
@@ -14,7 +16,9 @@ import {
 import {
    make_file_inode_blob,
    make_dir_inode_blob,
+   make_mutable_data_info,
    sign_data_payload,
+   sign_raw_data,
    hash_data_payload,
    inode_dir_link,
    inode_dir_unlink,
@@ -25,15 +29,21 @@ import {
    get_child_version,
 } from './inode';
 
+import {
+   json_stable_serialize
+} from './util';
+
 const http = require('http');
 const uuid4 = require('uuid/v4');
 const bitcoinjs = require('bitcoinjs-lib');
 const BigInteger = require('bigi');
 const Promise = require('promise');
+const assert = require('assert');
 
 const ENOENT = 2;
 const EEXIST = 17;
 const ENOTDIR = 20;
+const EREMOTEIO = 121;
 
 // datastore response includes the ID
 const DATASTORE_RESPONSE_SCHEMA = JSON.parse(JSON.stringify(DATASTORE_SCHEMA));
@@ -43,11 +53,14 @@ DATASTORE_RESPONSE_SCHEMA['properties']['datastore_id'] = {'type': 'string'};
  * Helper method to issue an HTTP request.
  * @param options (Object) set of HTTP request options
  * @param result_schema (Object) JSON schema of the expected result 
+ *
+ * Pass 'bytes' for result_schema if you expect application/octet-stream
+ * instead of application/json.
  */
-function http_request(options, result_schema) {
+function http_request(options, result_schema, body) {
 
    var p = new Promise(function(resolve, reject) {
-      http.request(options, function(response) {    
+      var req = http.request(options, function(response) {    
          var strbuf = [];
          response.on('data', function(chunk) {
             strbuf.push(chunk);
@@ -55,60 +68,47 @@ function http_request(options, result_schema) {
 
          response.on('end', function() {
             var str = Buffer.concat(strbuf).toString();
-            var resp = JSON.parse(str);
+            var resp = null;
 
-            // avoid memory leaks
+            if( result_schema != 'bytes' ) {
+               resp = JSON.parse(str);
+            }
+            else {
+               resp = str;
+            }
+
             str = null;
             strbuf = null;
 
-            if( result_schema ) {
+            if( result_schema && result_schema != 'bytes' ) {
                try {
                   inspector.validate(result_schema, resp);
                }
                catch(e) {
                   try {
-                     inspector.validate(E
-                  reject(e.message);
+                     inspector.validate(CORE_ERROR_SCHEMA, resp);
+                     reject(resp);
+                  }
+                  catch(e2) {
+                     reject("Invalid core message");
+                  }
                }
             }
-             
+
             resolve(resp);
          });
 
-         response.on('error', function(e) {
-            reject(e.message);
+         response.on('error', function() {
+            reject(resp);
          });
-      }).end();
+      });
+      
+      if( body ) {
+         req.write(body);
+      }
+      req.end();
    });
    return p;
-}
-
-function http_request(options, result_schema, continuation) {
-   var cb = function(response) {    
-      
-      var str = '';
-      response.on('data', function(chunk) {
-         str += chunk;
-      })
-
-      response.on('end', function() {
-         var resp = JSON.parse(str);
-         
-         if( result_schema ) {
-             inspector.validate(result_schema, resp);
-         }
-
-         if( !continuation ) {
-             continuation = function(r) {
-                return r;
-             };
-         }
-
-         return continuation(resp);
-      })
-   }
-
-   return http.request(options, cb);
 }
 
 
@@ -119,6 +119,29 @@ function http_request(options, result_schema, continuation) {
 export function datastore_get_id( ds_public_key_hex ) {
     var ec = bitcoinjs.ECPair.fromPublicKeyBuffer( Buffer.from(ds_public_key_hex, 'hex') );
     return ec.getAddress();
+}
+
+
+/*
+ * Get a public key (hex) from private key
+ */
+function get_pubkey_hex(privkey_hex) {
+   var privkey = BigInteger.fromBuffer( decode_privkey(privkey_hex) );
+   var public_key = new bitcoinjs.ECPair(privkey).getPublicKeyBuffer().toString('hex');
+   return public_key;
+}
+
+
+/*
+ * Get device list from device IDs
+ */
+function get_device_list( device_ids ) {
+   var escaped_device_ids = [];
+   for (var devid of device_ids) {
+      escaped_device_ids.push(escape(devid));
+   }
+   var res = escaped_device_ids.join(',');
+   return res;
 }
 
 
@@ -162,7 +185,7 @@ export function dirname(path) {
  * @param path (String) the path. Must be sanitized
  */
 export function basename(path) {
-   return path.split('/').slice(-1);
+   return path.split('/').slice(-1)[0];
 }
 
 
@@ -202,10 +225,9 @@ export function datastore_create_mkinfo( ds_type, ds_private_key_hex, drivers, d
    assert(ds_type == 'datastore' || ds_type == 'collection');
    var root_uuid = uuid4();
     
-   var ds_privkey = BigInteger.fromBuffer( decode_privkey(ds_private_key_hex) );
-   var ds_public_key = bitcoinjs.ECPair(ds_privkey).getPublicKeyBuffer().toString('hex');
+   var ds_public_key = get_pubkey_hex(ds_private_key_hex);
    var datastore_id = datastore_get_id( ds_public_key );
-   var root_blob = make_dir_inode_blob( datastore_id, datastore_id, root_uuid, {}, 1, device_id )
+   var root_blob_info = make_dir_inode_blob( datastore_id, datastore_id, root_uuid, {}, device_id, 1 );
 
    // actual datastore payload
    var datastore_info = {
@@ -217,11 +239,12 @@ export function datastore_create_mkinfo( ds_type, ds_private_key_hex, drivers, d
    };
 
    var data_id = `${datastore_id}.datastore`;
-   var datastore_blob = make_mutable_data_blob( data_id, json_stable_serialize(datastore_info), 1, device_id );
+   var datastore_blob = make_mutable_data_info( data_id, json_stable_serialize(datastore_info), device_id, 1 );
+   var datastore_str = json_stable_serialize(datastore_blob);
 
    // sign them all
-   var root_sig = sign_data_payload( root_blob, ds_private_key_hex );
-   var datastore_sig = sign_data_payload( datastore_blob, ds_private_key_hex );
+   var root_sig = sign_data_payload( root_blob_info.header, ds_private_key_hex );
+   var datastore_sig = sign_data_payload( datastore_str, ds_private_key_hex );
 
    // make and sign tombstones for the root
    var root_tombstones = make_inode_tombstones(datastore_id, root_uuid, all_device_ids);
@@ -230,14 +253,14 @@ export function datastore_create_mkinfo( ds_type, ds_private_key_hex, drivers, d
    var info = {
       'datastore_info': {
          'datastore_id': datastore_id,
-         'datastore_blob': datastore_blob, 
-         'root_blob': root_blob
+         'datastore_blob': datastore_str, 
+         'root_blob': root_blob_info.header,
       },
       'datastore_sigs': {
          'datastore_sig': datastore_sig, 
          'root_sig': root_sig, 
-         'root_tombstones': signed_tombstones
-      }
+      },
+      'root_tombstones': signed_tombstones,
    };
 
    return info;
@@ -246,13 +269,13 @@ export function datastore_create_mkinfo( ds_type, ds_private_key_hex, drivers, d
 
 /*
  * Create a datastore
- * Asynchronous; call .end() on the returned object.
+ * Asynchronous; returns a Promise
  *
  * Returns an async object whose .end() method returns a datastore object.
  * The returned object has the following properties:
  *      
  */
-export function datastore_create( blockstack_hostport, blockstack_session_token, datastore_request, datastore_sigs ) {
+export function datastore_create( blockstack_hostport, blockstack_session_token, datastore_request ) {
     
    var payload = {
       'datastore_info': {
@@ -263,9 +286,10 @@ export function datastore_create( blockstack_hostport, blockstack_session_token,
           'datastore_sig': datastore_request.datastore_sigs.datastore_sig,
           'root_sig': datastore_request.datastore_sigs.root_sig,
       },
+      'root_tombstones': datastore_request.root_tombstones,
    };
 
-   hostinfo = split_hostport(blockstack_hostport);
+   var hostinfo = split_hostport(blockstack_hostport);
 
    var options = {
       'method': 'POST',
@@ -275,17 +299,14 @@ export function datastore_create( blockstack_hostport, blockstack_session_token,
    };
 
    if( blockstack_session_token ) {
-      options['headers'] = {'Authorization': `bearer ${ds.session_token}`};
+      options['headers'] = {'Authorization': `bearer ${blockstack_session_token}`};
    } 
 
    var body = JSON.stringify(payload);
    options['headers']['Content-Type'] = 'application/json';
    options['headers']['Content-Length'] = body.length;
 
-   var req = http_request(options);
-   req.write(body);
-
-   return req;
+   return http_request(options, SUCCESS_FAIL_SCHEMA, body);
 }
 
 
@@ -298,19 +319,20 @@ export function datastore_create( blockstack_hostport, blockstack_session_token,
  * Returns an object to be given to datastore_delete()
  */
 export function datastore_delete_mkinfo( ds ) {
-   var datastore_id = ds.datastore.datastore_id;
+   var datastore_id = ds.datastore_id;
    var device_ids = ds.datastore.device_ids;
    var root_uuid = ds.datastore.root_uuid;
    var data_id = `${datastore_id}.datastore`;
 
    var tombstones = make_mutable_data_tombstones( device_ids, data_id );
-
    var signed_tombstones = sign_mutable_data_tombstones( tombstones, ds.privkey_hex );
-   var root_tombstones = make_inode_tombstones(datastore_id, root_uuid, all_device_ids);
+
+   var root_tombstones = make_inode_tombstones(datastore_id, root_uuid, device_ids);
+   var signed_root_tombstones = sign_mutable_data_tombstones( root_tombstones, ds.privkey_hex );
 
    var ret = {
       'datastore_tombstones': signed_tombstones,
-      'root_tombstones': root_tombstones,
+      'root_tombstones': signed_root_tombstones,
    };
 
    return ret;
@@ -322,10 +344,11 @@ export function datastore_delete_mkinfo( ds ) {
  * @param ds (Object) a datastore context
  * @param ds_tombstones (Object) signed information from datastore_delete_mkinfo()
  *
- * Asynchronous; call .end() on the returned object.
+ * Asynchronous; returns a Promise
  */
 export function datastore_delete( ds, ds_tombstones, root_tombstones ) {
     
+   var device_list = get_device_list(ds.datastore.device_ids);
    var payload = {
       'datastore_tombstones': ds_tombstones,
       'root_tombstones': root_tombstones,
@@ -335,10 +358,10 @@ export function datastore_delete( ds, ds_tombstones, root_tombstones ) {
       'method': 'DELETE',
       'host': ds.host,
       'port': ds.port,
-      'path': '/v1/stores'
+      'path': `/v1/stores?device_ids=${device_list}`
    };
 
-   if( blockstack_session_token ) {
+   if( ds.session_token ) {
       options['headers'] = {'Authorization': `bearer ${ds.session_token}`};
    } 
 
@@ -346,15 +369,13 @@ export function datastore_delete( ds, ds_tombstones, root_tombstones ) {
    options['headers']['Content-Type'] = 'application/json';
    options['headers']['Content-Length'] = body.length;
 
-   var req = http_request(options);
-   req.write(body);
-   return req;
+   return http_request(options, SUCCESS_FAIL_SCHEMA, body);
 }
 
 
 /*
  * Look up a datastore and establish enough contextual information to do subsequent storage operations.
- * Asynchronous; call .end() on the returned object.
+ * Asynchronous; returns a Promise
  *
  * Returns an async object whose .end() method returns a datastore connection,
  * with the following properties:
@@ -370,6 +391,7 @@ export function datastore_connect( blockstack_hostport, blockstack_session_token
       'port': hostinfo.port,
       'session_token': blockstack_session_token,
       'device_id': device_id,
+      'datastore_id': datastore_get_id( get_pubkey_hex( data_privkey_hex ) ),
       'privkey_hex': data_privkey_hex,
       'datastore': null,
    };
@@ -378,14 +400,17 @@ export function datastore_connect( blockstack_hostport, blockstack_session_token
       'method': 'GET',
       'host': hostinfo.host,
       'port': hostinfo.port,
-      'path': `/v1/stores/${datastore_id}`,
+      'path': `/v1/stores/${datastore_id}?device_ids=${device_id}`,
    }
 
    if( blockstack_session_token ) {
       options['headers'] = {'Authorization': `bearer ${blockstack_session_token}`};
    }
 
-   return http_request(options, DATASTORE_RESPONSE_SCHEMA, function(ds) { ctx['datastore'] = ds; return ctx });
+   return http_request(options, DATASTORE_RESPONSE_SCHEMA).then((ds) => {
+      ctx['datastore'] = ds.datastore;
+      return ctx;
+   });
 }
 
 
@@ -403,12 +428,13 @@ export function datastore_connect( blockstack_hostport, blockstack_session_token
  */
 export function lookup(ds, path, opts) {
 
-   var datastore_id = ds['datastore']['datastore_id'];
+   var datastore_id = ds.datastore_id;
+   var device_list = get_device_list(ds.datastore.device_ids);
    var options = {
       'method': 'GET',
       'host': ds.host,
       'port': ds.port,
-      'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitize_path(path))}`,
+      'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitize_path(path))}&device_ids=${device_list}`,
    };
 
    if(!opts) {
@@ -444,16 +470,17 @@ export function lookup(ds, path, opts) {
  *      .extended (Bool) whether or not to include the entire path's inode inforamtion
  *      .force (Bool) if True, then ignore stale inode errors.
  *
- * Asynchronous; call .end() on the returned object.
+ * Asynchronous; returns a Promise
  */
 export function listdir(ds, path, opts) {
 
-   var datastore_id = ds['datastore']['datastore_id'];
+   var datastore_id = ds.datastore_id;
+   var device_list = get_device_list(ds.datastore.device_ids);
    var options = {
       'method': 'GET',
       'host': ds.host,
       'port': ds.port,
-      'path': `/v1/stores/${datastore_id}/directories?path=${escape(sanitize_path(path))}&idata=1`,
+      'path': `/v1/stores/${datastore_id}/directories?path=${escape(sanitize_path(path))}&idata=1&device_ids=${device_list}`,
    };
 
    var schema = MUTABLE_DATUM_DIR_IDATA_SCHEMA;
@@ -471,7 +498,7 @@ export function listdir(ds, path, opts) {
       optsion['path'] += '&force=1';
    }
 
-   if( blockstack_session_token ) {
+   if( ds.session_token ) {
       options['headers'] = {'Authorization': `bearer ${ds.session_token}`};
    }
 
@@ -488,16 +515,17 @@ export function listdir(ds, path, opts) {
  *      .extended (Bool) whether or not to include the entire path's inode inforamtion
  *      .force (Bool) if True, then ignore stale inode errors.
  *
- * Asynchronous; call .end() on the returned object.
+ * Asynchronous; returns a Promise
  */
 export function stat(ds, path, opts) {
 
-   var datastore_id = ds.datastore.datastore_id;
+   var datastore_id = ds.datastore_id;
+   var device_list = get_device_list(ds.datastore.device_ids);
    var options = {
       'method': 'GET',
       'host': ds.host,
       'port': ds.port,
-      'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitize_path(path))}`,
+      'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitize_path(path))}&device_ids=${device_list}`,
    };
 
    var schema = MUTABLE_DATUM_INODE_SCHEMA;
@@ -515,7 +543,7 @@ export function stat(ds, path, opts) {
       optsion['path'] += '&force=1';
    }
 
-   if( blockstack_session_token ) {
+   if( ds.session_token ) {
       options['headers'] = {'Authorization': `bearer ${ds.session_token}`};
    } 
 
@@ -532,18 +560,18 @@ export function stat(ds, path, opts) {
  * @param opts (Object) optional arguments:
  *      .extended (Bool) whether or not to include the entire path's inode inforamtion
  *      .force (Bool) if True, then ignore stale inode errors.
- * @param continuation (functino) optional continuation function
  *
- * Asynchronous; call .end() on the returned object.
+ * Asynchronous; returns a Promise
  */
-function getinode(ds, path, opts, continuation) {
+function get_inode(ds, path, opts) {
 
-   var datastore_id = ds.datastore.datastore_id;
+   var datastore_id = ds.datastore_id;
+   var device_list = get_device_list(ds.datastore.device_ids);
    var options = {
       'method': 'GET',
       'host': ds.host,
       'port': ds.port,
-      'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitize_path(path))}&idata=1`,
+      'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitize_path(path))}&idata=1&device_ids=${device_list}`,
    };
 
    var schema = MUTABLE_DATUM_INODE_SCHEMA;
@@ -558,14 +586,14 @@ function getinode(ds, path, opts, continuation) {
    }
    
    if( opts.force ) {
-      optsion['path'] += '&force=1';
+      options['path'] += '&force=1';
    }
 
-   if( blockstack_session_token ) {
+   if( ds.session_token ) {
       options['headers'] = {'Authorization': `bearer ${ds.session_token}`};
    } 
 
-   return http_request(options, schema, continuation);
+   return http_request(options, schema);
 }
 
 
@@ -578,19 +606,20 @@ function getinode(ds, path, opts, continuation) {
  *      .extended (Bool) whether or not to include the entire path's inode inforamtion
  *      .force (Bool) if True, then ignore stale inode errors.
  *
- * Asynchronous; call .end() on the returned object.
+ * Asynchronous; returns a Promise
  */
 export function getfile(ds, path, opts) {
 
-   var datastore_id = ds.datastore.datastore_id;
+   var datastore_id = ds.datastore_id;
+   var device_list = get_device_list(ds.datastore.device_ids);
    var options = {
       'method': 'GET',
       'host': ds.host,
       'port': ds.port,
-      'path': `/v1/stores/${datastore_id}/files?path=${escape(sanitize_path(path))}&idata=1`,
+      'path': `/v1/stores/${datastore_id}/files?path=${escape(sanitize_path(path))}&idata=1&device_ids=${device_list}`,
    };
 
-   var schema = null;
+   var schema = 'bytes';
 
    if(!opts) {
       opts = {};
@@ -602,10 +631,10 @@ export function getfile(ds, path, opts) {
    }
 
    if( opts.force ) {
-      optsion['path'] += '&force=1';
+      options['path'] += '&force=1';
    }
 
-   if( blockstack_session_token ) {
+   if( ds.session_token ) {
       options['headers'] = {'Authorization': `bearer ${ds.session_token}`};
    }
 
@@ -624,25 +653,27 @@ export function getfile(ds, path, opts) {
  * @param signatures (Array) the list of signatures over each inode header (also 1-to-1 correspondence)
  * @param tombstones (Array) the list of signed inode tombstones
  *
- * Asynchronous; return .end() on the return object.
+ * Asynchronous; returns a Promise
  */
 function datastore_operation(ds, operation, path, inodes, payloads, signatures, tombstones) {
 
    var request_path = null;
    var http_operation = null;
-   var datastore_id = ds.datastore.datastore_id;
+   var datastore_id = ds.datastore_id;
+   var datastore_privkey = ds.privkey_hex;
+   var device_list = get_device_list(ds.datastore.device_ids);
 
-   assert(inode.length == payloads.length);
+   assert(inodes.length == payloads.length);
    assert(payloads.length == signatures.length);
 
    if( operation == 'mkdir' ) {
-      request_path = `/v1/stores/${datastore_id}/directories?path=${escape(sanitize_path(path))}`;
+      request_path = `/v1/stores/${datastore_id}/directories?path=${escape(sanitize_path(path))}&device_ids=${device_list}`;
       http_operation = 'POST';
 
       assert(inodes.length == 2);
    }
    else if( operation == 'putfile' ) {
-      request_path = `/v1/stores/${datastore_id}/files?path=${escape(sanitize_path(path))}`;
+      request_path = `/v1/stores/${datastore_id}/files?path=${escape(sanitize_path(path))}&device_ids=${device_list}`;
       http_operation = 'PUT';
 
       assert(inodes.length == 1 || inodes.length == 2);
@@ -652,14 +683,14 @@ function datastore_operation(ds, operation, path, inodes, payloads, signatures, 
       http_operation = 'DELETE';
 
       assert(inodes.length == 1);
-      assert(tombstones.length == 1);
+      assert(tombstones.length >= 1);
    }
-   else if( operation == 'unlink' ) {
+   else if( operation == 'deletefile' ) {
       request_path = `/v1/stores/${datastore_id}/files?path=${escape(sanitize_path(path))}`;
       http_operation = 'DELETE';
 
-      assert(inodes.length == 0);
-      assert(tombstones.length == 1);
+      assert(inodes.length == 1);
+      assert(tombstones.length >= 1);
    }
    else {
       assert(0);
@@ -669,14 +700,30 @@ function datastore_operation(ds, operation, path, inodes, payloads, signatures, 
       'method': http_operation,
       'host': ds.host,
       'port': ds.port,
-      'path': request_path
+      'path': request_path,
    };
 
-   if( blockstack_session_token ) {
+   if( ds.session_token ) {
       options['headers'] = {'Authorization': `bearer ${ds.session_token}`};
    }
 
-   return http_request(options, SUCCESS_FAIL_SCHEMA);
+   var datastore_str = JSON.stringify(ds.datastore);
+   var datastore_sig = sign_raw_data( datastore_str, datastore_privkey ); 
+
+   var body_struct = {
+      'inodes': inodes,
+      'payloads': payloads,
+      'signatures': signatures,
+      'tombstones': tombstones,
+      'datastore_str': datastore_str,
+      'datastore_sig': datastore_sig,
+   }
+
+   var body = JSON.stringify(body_struct);
+   options['headers']['Content-Type'] = 'application/json';
+   options['headers']['Content-Length'] = body.length;
+
+   return http_request(options, SUCCESS_FAIL_SCHEMA, body);
 }
 
 
@@ -688,26 +735,26 @@ function datastore_operation(ds, operation, path, inodes, payloads, signatures, 
  * @param path (String) the path to the inode in question
  * @param opts (Object) lookup options
  *
- * Asynchronous; call .end() on the returned object.
+ * Asynchronous; returns a Promise
  */
-export function get_parent(ds, path, opts, continuation) {
+export function get_parent(ds, path, opts) {
    var dirpath = dirname(path);
-   var parent_dir = getinode(ds, path, opts, function(resp) {
-      var inode = resp.inode_info.inode;
-      if(inode.type != MUTABLE_DATUM_DIR_TYPE) {
-         return {'error': 'Not a directory', 'errno': ENOTDIR}
-      }
-
-      if( !continuation ) {
-         continuation = function(inode) {
+   return get_inode(ds, dirpath, opts).then(
+      (inode) => {
+         if(!inode) {
+            return {'error': 'Failed to get parent', 'errno': EREMOTEIO};
+         }
+         if(inode.type != MUTABLE_DATUM_DIR_TYPE) {
+            return {'error': 'Not a directory', 'errno': ENOTDIR}
+         }
+         else {
             return inode;
          }
+      },
+      (error_resp) => {
+         return {'error': 'Failed to get inode', 'errno': EREMOTEIO};
       }
-
-      return continuation(inode);
-   })
-
-   return parent_dir;
+   );
 }
 
 
@@ -718,11 +765,11 @@ export function get_parent(ds, path, opts, continuation) {
  * @param path (String) the path to the file to create (must not exist)
  * @param file_buffer (Buffer) the file contents
  *
- * Asynchronous; call .end() on the returned object.
+ * Asynchronous; returns a Promise
  */
-export function putfile(ds, path, file_buffer, parent_dir, continuation) {
+export function putfile(ds, path, file_buffer) {
 
-   var datastore_id = ds.datastore.datastore_id;
+   var datastore_id = ds.datastore_id;
    var device_id = ds.device_id;
    var privkey_hex = ds.privkey_hex;
 
@@ -730,44 +777,46 @@ export function putfile(ds, path, file_buffer, parent_dir, continuation) {
    var child_name = basename(path);
 
    // get parent dir 
-   if( !parent_dir ) {
-       parent_dir = get_parent(ds, path).end();
-       if( parent_dir.error ) {
-          return parent_dir;
-       }
-   }
+   return get_parent(ds, path).then(
+      (parent_dir) => {
+         
+         if( parent_dir.error ) {
+            return parent_dir;
+         }
 
-   // make the file inode information
-   var file_hash = hash_data_payload( file_buffer );
-   var file_payload = file_buffer.toString('base64');
-   var inode_uuid = null;
-   var new_parent_dir_inode = null;
-   var child_version = null;
+         // make the file inode information
+         var file_payload = file_buffer.toString('base64');
+         var file_hash = hash_data_payload( file_payload );
+         var inode_uuid = null;
+         var new_parent_dir_inode = null;
+         var child_version = null;
 
-   // new or existing?
-   if( Object.keys(parent_dir['idata']).includes(child_name) ) {
+         // new or existing?
+         if( Object.keys(parent_dir['idata']).includes(child_name) ) {
 
-      // existing; no directory change
-      inode_uuid = parent_dir['idata'][child_name]['uuid'];
-      new_parent_dir_inode = inode_dir_link(parent_dir, MUTABLE_DATUM_TYPE_FILE, child_name, inode_uuid, true );
-   }
-   else {
+            // existing; no directory change
+            inode_uuid = parent_dir['idata'][child_name]['uuid'];
+            new_parent_dir_inode = inode_dir_link(parent_dir, MUTABLE_DATUM_TYPE_FILE, child_name, inode_uuid, true );
+         }
+         else {
 
-      // new 
-      inode_uuid = uuid4();
-      new_parent_dir_inode = inode_dir_link(parent_dir, MUTABLE_DATUM_FILE_TYPE, child_name, inode_uuid, false );
-   }
+            // new 
+            inode_uuid = uuid4();
+            new_parent_dir_inode = inode_dir_link(parent_dir, MUTABLE_DATUM_FILE_TYPE, child_name, inode_uuid, false );
+         }
 
-   var version = get_child_version(parent_dir, child_name);
-   var inode_info = make_file_inode_info( datastore_id, datastore_id, inode_uuid, file_hash, version, device_id );
-   var inode_sig = sign_data_payload( inode_info['header'], privkey_hex, file_hash );
+         var version = get_child_version(parent_dir, child_name);
+         var inode_info = make_file_inode_blob( datastore_id, datastore_id, inode_uuid, file_hash, device_id, version );
+         var inode_sig = sign_data_payload( inode_info['header'], privkey_hex );
 
-   // make the directory inode information
-   var new_parent_info = make_dir_inode_info( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata'], new_parent_dir_inode['version'] + 1, device_id );
-   var new_parent_sig = sign_data_payload( new_parent_info['header'], privkey_hex );
+         // make the directory inode information
+         var new_parent_info = make_dir_inode_blob( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata'], device_id, new_parent_dir_inode['version'] + 1);
+         var new_parent_sig = sign_data_payload( new_parent_info['header'], privkey_hex );
 
-   // post them 
-   return datastore_operation(ds, 'putfile', path, [inode_info['header'], new_parent_blob['header']], [file_payload, new_parent_info['idata']], [inode_sig, new_parent_sig], []);
+         // post them 
+         return datastore_operation(ds, 'putfile', path, [inode_info['header'], new_parent_info['header']], [file_payload, new_parent_info['idata']], [inode_sig, new_parent_sig], []);
+      },
+   );
 }
 
 
@@ -776,43 +825,44 @@ export function putfile(ds, path, file_buffer, parent_dir, continuation) {
  *
  * @param ds (Object) datastore context
  * @param path (String) path to the directory
- * @param parent_dir (Object) (optional) parent directory inode
  *
- * Asynchronous; call .end() on the returned object.
+ * Asynchronous; returns a Promise
  */
 export function mkdir(ds, path, parent_dir) {
 
-   var datastore_id = ds.datastore.datastore_id;
+   var datastore_id = ds.datastore_id;
    var device_id = ds.device_id;
    var privkey_hex = ds.privkey_hex;
 
    path = sanitize_path(path);
    var child_name = basename(path);
 
-   if(!parent_dir) {
-      parent_dir = get_parent(ds, path).end();
-      if( parent_dir.error ) {
-         return parent_dir;
-      }
-   }
+   return get_parent(ds, path).then(
+      (parent_dir) => {
 
-   // must not exist 
-   if( Object.keys(parent_dir['idata']).includes(child_name) ) {
-      return {'error': 'File or directory exists', 'errno': EEXIST};
-   }
+         if( parent_dir.error ) {
+            return parent_dir;
+         }
 
-   // make the directory inode information 
-   var inode_uuid = uuid4();
-   var inode_info = make_dir_inode_info( datastore_id, datastore_id, inode_uuid, {}, 1, device_id);
-   var inode_sig = sign_data_payload( inode_info['header'], privkey_hex );
+         // must not exist 
+         if( Object.keys(parent_dir['idata']).includes(child_name) ) {
+            return {'error': 'File or directory exists', 'errno': EEXIST};
+         }
 
-   // make the new parent directory information 
-   var new_parent_dir_inode = inode_dir_link(parent_dir, MUTABLE_DATUM_DIR_TYPE, child_name, inode_uuid);
-   var new_parent_info = make_dir_inode_info( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata'], new_parent_dir_inode['version'] + 1, device_id );
-   var new_parent_sig = sign_data_payload( new_parent_info['header'], privkey_hex );
+         // make the directory inode information 
+         var inode_uuid = uuid4();
+         var inode_info = make_dir_inode_blob( datastore_id, datastore_id, inode_uuid, {}, device_id);
+         var inode_sig = sign_data_payload( inode_info['header'], privkey_hex );
 
-   // post them 
-   return datastore_operation(ds, 'mkdir', path, [inode_info['header'], new_parent_blob['header']], [inode_info['idata'], new_parent_info['idata']], [inode_sig, new_parent_sig], []);
+         // make the new parent directory information 
+         var new_parent_dir_inode = inode_dir_link(parent_dir, MUTABLE_DATUM_DIR_TYPE, child_name, inode_uuid);
+         var new_parent_info = make_dir_inode_blob( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata'], device_id, new_parent_dir_inode['version'] + 1);
+         var new_parent_sig = sign_data_payload( new_parent_info['header'], privkey_hex );
+
+         // post them 
+         return datastore_operation(ds, 'mkdir', path, [inode_info['header'], new_parent_info['header']], [inode_info['idata'], new_parent_info['idata']], [inode_sig, new_parent_sig], []);
+      },
+   );
 }
 
 
@@ -823,43 +873,44 @@ export function mkdir(ds, path, parent_dir) {
  * @param path (String) path to the directory
  * @param parent_dir (Object) (optional) parent directory inode
  *
- * Asynchronous; call .end() on the returned object
+ * Asynchronous; returns a Promise
  */
-export function unlink(ds, path, parent_dir) {
+export function deletefile(ds, path, parent_dir) {
 
-   var datastore_id = ds.datastore.datastore_id;
+   var datastore_id = ds.datastore_id;
    var device_id = ds.device_id;
-   var all_device_ids = ds.device_ids;
    var privkey_hex = ds.privkey_hex;
+   var all_device_ids = ds.datastore.device_ids;
 
    path = sanitize_path(path);
    var child_name = basename(path);
 
-   if(!parent_dir) {
-      parent_dir = get_parent(ds, path).end();
-      if( parent_dir.error ) {
-         return parent_dir;
-      }
-   }
+   return get_parent(ds, path).then(
+      (parent_dir) => {
+         if( parent_dir.error ) {
+            return parent_dir;
+         }
 
-   // no longer exists?
-   if( !Object.keys(parent_dir['idata']).includes(child_name) ) {
-      return {'error': 'No such file or directory', 'errno': ENOENT};
-   }
+         // no longer exists?
+         if( !Object.keys(parent_dir['idata']).includes(child_name) ) {
+            return {'error': 'No such file or directory', 'errno': ENOENT};
+         }
 
-   var inode_uuid = parent_dir['idata'][child_name];
+         var inode_uuid = parent_dir['idata'][child_name];
 
-   // unlink 
-   var new_parent_dir_inode = inode_dir_unlink(parent_dir, name);
-   var new_parent_info = make_dir_inode_info( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata'], new_parent_dir_inode['version'] + 1, device_id );
-   var new_parent_sig = sign_data_payload( new_parent_info['header'], privkey_hex );
+         // unlink 
+         var new_parent_dir_inode = inode_dir_unlink(parent_dir, child_name);
+         var new_parent_info = make_dir_inode_blob( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata'], device_id, new_parent_dir_inode['version'] + 1 );
+         var new_parent_sig = sign_data_payload( new_parent_info['header'], privkey_hex );
 
-   // make tombstones 
-   var tombstones = make_inode_tombstones(datastore_id, inode_uuid, all_device_ids);
-   var signed_tombstones = sign_mutable_data_tombstones(tombstones, privkey_hex);
+         // make tombstones 
+         var tombstones = make_inode_tombstones(datastore_id, inode_uuid, all_device_ids);
+         var signed_tombstones = sign_mutable_data_tombstones(tombstones, privkey_hex);
    
-   // post them 
-   return datastore_operation(ds, 'unlink', path, [new_parent_blob['header']], [new_parent_info['idata']], [new_parent_sig], signed_tombstones);
+         // post them 
+         return datastore_operation(ds, 'deletefile', path, [new_parent_info['header']], [new_parent_info['idata']], [new_parent_sig], signed_tombstones);
+      }
+   );
 }
 
 
@@ -870,43 +921,44 @@ export function unlink(ds, path, parent_dir) {
  * @param path (String) path to the directory
  * @param parent_dir (Object) (optional) parent directory inode
  *
- * Asynchronous; call .end() on the returned object 
+ * Asynchronous; returns a Promise
  */
 export function rmdir(ds, path, parent_dir) {
 
-   var datastore_id = ds.datastore.datastore_id;
+   var datastore_id = ds.datastore_id;
    var device_id = ds.device_id;
-   var all_device_ids = ds.device_ids;
    var privkey_hex = ds.privkey_hex;
+   var all_device_ids = ds.datastore.device_ids;
 
    path = sanitize_path(path);
    var child_name = basename(path);
 
-   if(!parent_dir) {
-      parent_dir = get_parent(ds, path).end();
-      if( parent_dir.error ) {
-         return parent_dir;
+   return get_parent(ds, path).then(
+      (parent_dir) => {
+         if( parent_dir.error ) {
+            return parent_dir;
+         }
+
+         // no longer exists?
+         if( !Object.keys(parent_dir['idata']).includes(child_name) ) {
+            return {'error': 'No such file or directory', 'errno': ENOENT};
+         }
+
+         var inode_uuid = parent_dir['idata'][child_name];
+
+         // unlink 
+         var new_parent_dir_inode = inode_dir_unlink(parent_dir, child_name);
+         var new_parent_info = make_dir_inode_blob( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata'], device_id, new_parent_dir_inode['version'] + 1 );
+         var new_parent_sig = sign_data_payload( new_parent_info['header'], privkey_hex );
+
+         // make tombstones 
+         var tombstones = make_inode_tombstones(datastore_id, inode_uuid, all_device_ids);
+         var signed_tombstones = sign_mutable_data_tombstones(tombstones, privkey_hex);
+
+         // post them 
+         return datastore_operation(ds, 'rmdir', path, [new_parent_info['header']], [new_parent_info['idata']], [new_parent_sig], signed_tombstones);
       }
-   }
-
-   // no longer exists?
-   if( !Object.keys(parent_dir['idata']).includes(child_name) ) {
-      return {'error': 'No such file or directory', 'errno': ENOENT};
-   }
-
-   var inode_uuid = parent_dir['idata'][child_name];
-
-   // unlink 
-   var new_parent_dir_inode = inode_dir_unlink(parent_dir, name);
-   var new_parent_info = make_dir_inode_blob( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata'], new_parent_dir_inode['version'] + 1, device_id );
-   var new_parent_sig = sign_data_payload( new_parent_info['header'], privkey_hex );
-
-   // make tombstones 
-   var tombstones = make_inode_tombstones(datastore_id, inode_uuid, all_device_ids);
-   var signed_tombstones = sign_mutable_data_tombstones(tombstones, privkey_hex);
-
-   // post them 
-   return datastore_operation(ds, 'rmdir', path, [new_parent_blob['header']], [new_parent_info['idata']], [new_parent_sig], signed_tombstones);
+   );
 }
 
 
