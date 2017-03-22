@@ -26,6 +26,23 @@ const bitcoinjs = require('bitcoinjs-lib');
 const http = require('http');
 const jsontokens = require('jsontokens');
 const BigInteger = require('bigi');
+const Promise = require('promise');
+
+Promise.sequence = function (chain) {
+    var results = [];
+    var entries = chain;
+    if (entries.entries) entries = entries.entries();
+    return new Promise(function (yes, no) {
+        var next = function () {
+            var entry = entries.next();
+            if(entry.done) yes(results);
+            else {
+                results.push(entry.value[1]().then(next, function() { no(results); } ));
+            }
+        };
+        next();
+    });
+};
 
 var args = process.argv.slice(2);
 assert(args.length > 0);
@@ -42,96 +59,118 @@ function dir_expect(dir, names) {
    return true;
 }
 
-function stat_dirs(ds_str, dir_list, expect_error) {
-   for (var dir_path of dir_list) {
-      var res = datastore_stat(ds_str, dir_path);
-      if( res.error || !res.inode ) {
-         if( expect_error ) {
-            continue;
-         }
-         else {
-            console.log(res.error);
-            return false;
-         }
-      }
+function stat_dir(ds_str, dir_path, expect_error) {
+   return datastore_stat(ds_str, dir_path).then(
+   (inode) => {
+        console.log(`stat dir ${dir_path} got result: ${JSON.stringify(inode)}`);
+        if( inode.error || !inode ) {
+           if( expect_error ) {
+              return true;
+           }
+           else {
+              console.log(inode.error);
+              return false;
+           }
+        }
 
-      if( res.inode.type != 2 ) {
-         console.log(res.error);
-         return false;
-      }
-   }
-   return true;
+        if( inode.type != 2 ) {
+           console.log(inode);
+           return false;
+        }
+
+        return true;
+   },
+   (error) => {
+        console.log(`stat ${dir_path} failed`);
+        console.log(error);
+        console.log(JSON.stringify(error));
+        return false;
+   });
 }
 
-function stat_files(ds_str, file_list, expect_error) {
-   for (var file_path of file_list) {
-      var res = datastore_stat(ds_str, file_path);
-      if( res.error || !res.inode ) {
-         if( expect_error ) {
-            continue;
-         }
-         else {
-            console.log(res.error);
-            return false;
-         }
-      }
+function stat_file(ds_str, file_path, expect_error) {
+   return datastore_stat(ds_str, file_path).then(
+   (inode) => {
+        console.log(`stat file ${file_path} got result: ${JSON.stringify(inode)}`);
+        if( inode.error || !inode ) {
+           if( expect_error ) {
+              return true;
+           }
+           else {
+              console.log(inode.error);
+              return false;
+           }
+        }
 
-      if( res.inode.type != 1 ) {
-         console.log(res.error);
-         return false;
-      }
-   }
-   return true;
-}
+        if( inode.type != 1 ) {
+           console.log(inode);
+           return false;
+        }
 
-function files_expect(ds_str, paths, contents) {
-   assert(paths.length == contents.length);
-   for( var i = 0; i < paths.length; i++ ) {
-      var file_path = paths[i];
-      var content = contents[i];
-      var res = datastore_getfile(ds_str, path);
-      if( res.error ) {
-         console.log(res.error);
-         return false;
-      }
-
-      if( res != content ) {
-         console.log(`expected ${content}; got ${res}`);
-         return false;
-      }
-   }
-   return true;
+        return true;
+   },
+   (error) => {
+        console.log(`stat ${file_path} failed`);
+        console.log(error);
+        console.log(JSON.stringify(error));
+        return false;
+   });
 }
 
 
-function http_request(options, result_schema, continuation) {
-   var cb = function(response) {    
-   
-      var str = '';
-      response.on('data', function(chunk) {
-         str += chunk;
-      });
-
-      response.on('end', function() {
-         var resp = JSON.parse(str);
-         
-         if( result_schema ) {
-             inspector.validate(result_schema, resp);
-         }
-
-         if( !continuation ) {
-             continuation = function(r) {
-                return r;
-             };
-         }
+function file_expect(ds_str, file_path, content) {
+   return datastore_getfile(ds_str, file_path).then(
+   (idata) => {
+        console.log(`getfile ${file_path} got result: ${JSON.stringify(idata)}`);
+        if( idata.error || !idata ) {
+           if( expect_error ) {
+              return true;
+           }
+           else {
+              console.log(idata.error);
+              return false;
+           }
+        }
         
-         console.log(resp);
-         return continuation(resp);
-      });
-   }
- 
-   console.log(options)
-   return http.request(options, cb);
+        if( idata != content ) {
+           console.log(`expected ${content}; got ${idata}`);
+        }
+
+        return true;
+   },
+   (error) => {
+        console.log(`getfile ${file_path} failed`);
+        console.log(error);
+        console.log(JSON.stringify(error));
+        return false;
+   });
+}
+
+
+function http_request(options) {
+
+   var p = new Promise(function(resolve, reject) {
+      http.request(options, function(response) {    
+         var strbuf = [];
+         response.on('data', function(chunk) {
+            strbuf.push(chunk);
+         });
+
+         response.on('end', function() {
+            var str = Buffer.concat(strbuf).toString();
+            var resp = JSON.parse(str);
+            str = null;
+            strbuf = null;
+              
+            resolve(resp);
+         });
+
+         response.on('error', function() {
+            reject(resp);
+         });
+      }).end();
+   });
+   return p;
 }
 
 
@@ -158,9 +197,7 @@ function get_session_token(host, port, ds_private_key_hex, api_password) {
       }
    };
 
-   var req = http_request(options);
-   var resp = req.end();
-   return resp['token'];
+   return http_request(options);
 }
 
 function node_ping(host, port) {
@@ -171,9 +208,7 @@ function node_ping(host, port) {
       'path': '/v1/node/ping',
    };
 
-   var req = http_request(options);
-   var resp = req.end();
-   return resp;
+   return http_request(options);
 }
 
 
@@ -231,121 +266,324 @@ else if( command == 'unittest' ) {
    var session_token = null;
   
    console.log(`private key is ${datastore_privkey_hex}`);
-
+   console.log(`public key is ${datastore_pubkey_hex}`);
    console.log("begin ping");
-   res = node_ping('localhost', 6270);
-   console.log(`ping result: ${res}`);
 
-   session_token = get_session_token('localhost', 6270, datastore_privkey_hex, api_password);
-   if( !session_token ) {
-      console.log("failed to authenticate");
-      process.exit(1);
-   }
+   node_ping('localhost', 6270)
+      .then((res) => {
+
+           console.log(`ping result: ${JSON.stringify(res)}`);
+           return get_session_token('localhost', 6270, datastore_privkey_hex, api_password);
+
+      }, (error) => {console.log(JSON.stringify(error)); process.exit(1);})
+      .then((token_res) => {
+            
+           console.log(`session result: ${JSON.stringify(token_res)}`);
+           session_token = token_res.token;
+           if( !session_token ) {
+              console.log("failed to authenticate");
+              process.exit(1);
+           }
    
-   res = create_datastore(datastore_privkey_hex, session_token, device_id, [device_id], ['disk']);
-   if( res.error ) {
-      console.log(res);
-      process.exit(1);
-   }
+           return create_datastore(datastore_privkey_hex, session_token, device_id, JSON.stringify([device_id]), JSON.stringify(['disk']));
 
-   res = get_datastore(session_token, datastore_id, datastore_privkey_hex, device_id);
-   if( res.error ) {
-      console.log(res);
-      process.exit(1);
-   }
+      }, (error) => {console.log("get session token failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+       
+           console.log(`create_datastore result: ${JSON.stringify(res)}`);
+           if( res.error ) {
+              console.log(res);
+              process.exit(1);
+           }
 
-   datastore = res.datastore;
-   datastore_str = JSON.stringify(datastore);
+           return get_datastore(session_token, datastore_id, datastore_privkey_hex, device_id);
 
-   res = datastore_mkdir(datastore_str, '/dir1');
-   if( res.error ) {
-      console.log(res);
-      process.exit(1);
-   }
+      }, (error) => {console.log("create_datastore failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
 
-   res = datastore_mkdir(datastore_str, '/dir1/dir2');
-   if( res.error ) {
-      console.log(res);
-      process.exit(1);
-   }
+           console.log(`get_datastore result: ${JSON.stringify(res)}`);
+           if( res.error ) {
+              console.log(res);
+              console.log("exiting");
+              process.exit(1);
+           }
 
-   res = datastore_putfile(datastore_str, '/file1', "hello world");
-   if( res.error ) {
-      console.log(res);
-      process.exit(1);
-   }
+           datastore = res.datastore;
+           datastore_str = JSON.stringify(res);
 
-   res = datastore_putfile(datasore_str, '/dir1/file2', "hello world 2");
-   if( res.error ) {
-      console.log(res);
-      process.exit(1);
-   }
+           return datastore_mkdir(datastore_str, '/dir1');
 
-   res = datastore_putfile(datastore_str, '/dir1/dir2/file3', 'hello world 3');
-   if( res.error ) {
-      console.log(res);
-      process.exit(1);
-   }
+      }, (error) => {console.log("get datastore failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
 
-   res = datastore_listdir(datastore_str, '/');
-   if( res.error || !res.dir ) {
-      console.log(res);
-      process.exit(1);
-   }
+           console.log(`datastore_mkdir result: ${JSON.stringify(res)}`);
+           if( res.error ) {
+              console.log(res);
+              console.log(JSON.stringify(error));
+              console.log("exiting");
+              process.exit(1);
+           }
 
-   if( !dir_expect(res.dir, ['dir1', 'file1']) ) {
-      console.log(res);
-      process.exit(1);
-   }
+           return datastore_mkdir(datastore_str, '/dir1/dir2');
 
-   res = datastore_listdir(datastore_str, '/dir1');
-   if( res.error || !res.dir ) {
-      console.log(res);
-      process.exit(1);
-   }
+      }, (error) => {console.log("mkdir /dir1 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
 
-   if( !dir_expect(res.dir, ['dir2', 'file2']) ) {
-      console.log(res);
-      process.exit(1);
-   }
+           console.log(`datastore_mkdir result: ${JSON.stringify(res)}`);
+           if( res.error ) {
+              console.log(res);
+              process.exit(1);
+           }
 
-   if( !stat_dirs(ds_str, ['/', '/dir1', '/dir1/dir2']) ) {
-      process.exit(1);
-   }
+           return datastore_putfile(datastore_str, '/file1', "hello world");
 
-   if( !stat_files(ds_str, ['/file1', '/dir1/file2', '/dir1/dir2/file3']) ) {
-      process.exit(1);
-   }
+      }, (error) => {console.log("mkdir /dir1/dir2 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
 
-   if( !files_expect(ds_str, ['/file1', '/dir1/file2', '/dir1/dir2/file3'], ['hello world', 'hello world 2', 'hello world 3']) ) {
-      process.exit(1);
-   }
+           console.log(`datastore_putfile result: ${JSON.stringify(res)}`);
+           if( res.error ) {
+              console.log(res);
+              process.exit(1);
+           }
 
-   for (var file_path in ['/file1', '/dir1/file2', '/dir1/dir2/file3']) {
-      res = datastore_deletefile(ds_str, file_path);
-      if( res.error ) {
-         console.log(res);
-         process.exit(1);
-      }
-   }
+           return datastore_putfile(datastore_str, '/dir1/file2', "hello world 2");
 
-   if( !stat_files(ds_str, ['/file1', '/dir1/file2', '/dir1/dir2/file3'], true) ) {
-      process.exit(1);
-   }
+      }, (error) => {console.log("putfile /file1 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
 
-   for (var dir_path in ['/dir1/dir2', '/dir1'] ) {
-      res = datastore_rmdir(ds_str, dir_path);
-      if( res.error ) {
-         console.log(res);
-         process.exit(1);
-      }
-   }
+           console.log(`datastore_putfile result: ${JSON.stringify(res)}`);
+           if( res.error ) {
+              console.log(res);
+              process.exit(1);
+           }
 
-   if( !stat_dirs(ds_str, ['/dir1', '/dir1/dir2'], true) ) {
-      process.exit(1);
-   }
+           return datastore_putfile(datastore_str, '/dir1/dir2/file3', 'hello world 3');
 
-   process.exit(0);
+      }, (error) => {console.log("putfile /dir1/file2 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`datastore_putfile result: ${JSON.stringify(res)}`);
+           if( res.error ) {
+              console.log(res);
+              process.exit(1);
+           }
+
+           return datastore_listdir(datastore_str, '/');
+
+      }, (error) => {console.log("putfile /dir1/dir2/file3 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`datastore_listdir result: ${JSON.stringify(res)}`);
+           if( !res || res.error) {
+              console.log(res);
+              process.exit(1);
+           }
+
+           if( !dir_expect(res, ['dir1', 'file1']) ) {
+              console.log("Missing dir1 or file1");
+              console.log(res);
+              process.exit(1);
+           }
+
+           return datastore_listdir(datastore_str, '/dir1');
+
+      }, (error) => {console.log("listdir / failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`datastore_listdir result: ${JSON.stringify(res)}`);
+           if( !res || res.error) {
+              console.log(res);
+              process.exit(1);
+           }
+
+           if( !dir_expect(res, ['dir2', 'file2']) ) {
+              console.log("Missing dir2 or file2");
+              console.log(res);
+              process.exit(1);
+           }
+
+           return stat_dir(datastore_str, '/');
+      
+      }, (error) => {console.log("listdir /dir1 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`stat_dir result: ${JSON.stringify(res)}`);
+           if( !res ) {
+              process.exit(1);
+           }
+           return stat_dir(datastore_str, '/dir1');
+      
+      }, (error) => {console.log("stat dir / failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`stat_dir result: ${JSON.stringify(res)}`);
+           if( !res ) {
+              process.exit(1);
+           }
+           return stat_dir(datastore_str, '/dir1/dir2');
+      
+      }, (error) => {console.log("stat dir /dir1 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`stat_dir result: ${JSON.stringify(res)}`);
+           if( !res ) {
+              process.exit(1);
+           }
+           return stat_file(datastore_str, '/file1');
+      
+      }, (error) => {console.log("stat dir /dir1/dir2 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`stat_file result: ${JSON.stringify(res)}`);
+           if( !res ) {
+              process.exit(1);
+           }
+           return stat_file(datastore_str, '/dir1/file2');
+      
+      }, (error) => {console.log("stat file /file1 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`stat_file result: ${JSON.stringify(res)}`);
+           if( !res ) {
+              process.exit(1);
+           }
+           return stat_file(datastore_str, '/dir1/dir2/file3');
+      
+      }, (error) => {console.log("stat file /dir1/file2 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`stat_file result: ${JSON.stringify(res)}`);
+           if( !res ) {
+              process.exit(1);
+           }
+           return file_expect(datastore_str, '/file1', 'hello world');
+      
+      }, (error) => {console.log("stat file /dir1/dir2/file3 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`file_expect result: ${JSON.stringify(res)}`);
+           if( !res ) {
+              process.exit(1);
+           }
+           return file_expect(datastore_str, '/dir1/file2', 'hello world 2');
+      
+      }, (error) => {console.log("get file /file1 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`file_expect result: ${JSON.stringify(res)}`);
+           if( !res ) {
+              process.exit(1);
+           }
+           return file_expect(datastore_str, '/dir1/dir2/file3', 'hello world 3');
+      
+      }, (error) => {console.log("get file /dir1/file2 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`file_expect result: ${JSON.stringify(res)}`);
+           if( !res || res.error) {
+              process.exit(1);
+           }
+           return datastore_deletefile(datastore_str, '/file1');
+
+      }, (error) => {console.log("get file /dir1/dir2/file3 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`deletefile result: ${JSON.stringify(res)}`);
+           if( !res || res.error) {
+              process.exit(1);
+           }
+           return datastore_deletefile(datastore_str, '/dir1/file2');
+
+      }, (error) => {console.log("delete file /file1 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`deletefile result: ${JSON.stringify(res)}`);
+           if( !res || res.error ) {
+              process.exit(1);
+           }
+           return datastore_deletefile(datastore_str, '/dir1/dir2/file3');
+
+      }, (error) => {console.log("delete file /dir1/file2 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`deletefile result: ${JSON.stringify(res)}`);
+           if( !res || res.error ) {
+              process.exit(1);
+           }
+           return stat_file(datastore_str, '/file1', true);
+      
+      }, (error) => {console.log("delete file /dir1/dir2/file3 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`stat_file result (expect failure): ${JSON.stringify(res)}`);
+           if( !res || res.error) {
+              process.exit(1);
+           }
+           return stat_file(datastore_str, '/dir1/file2', true);
+      
+      }, (error) => {console.log("stat /file2 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`stat_file result (expect failure): ${JSON.stringify(res)}`);
+           if( !res || res.error ) {
+              process.exit(1);
+           }
+           return stat_file(datastore_str, '/dir1/dir2/file3', true);
+      
+      }, (error) => {console.log("stat file /dir1/file2 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`stat_file result (expect failure): ${JSON.stringify(res)}`);
+           if( !res || res.error ) {
+              process.exit(1);
+           }
+           return datastore_rmdir(datastore_str, '/dir1/dir2');
+
+      }, (error) => {console.log("stat file /dir1/dir2/file3 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`rmdir result: ${JSON.stringify(res)}`);
+           if( !res || res.error ) {
+              process.exit(1);
+           }
+           return datastore_rmdir(datastore_str, '/dir1');
+
+      }, (error) => {console.log("rmdir /dir1/dir2 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`rmdir result: ${JSON.stringify(res)}`);
+           if( !res || res.error ) {
+              process.exit(1);
+           }
+           return stat_dir(datastore_str, '/dir1', true);
+      
+      }, (error) => {console.log("rmdir /dir1 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`stat_dir result: ${JSON.stringify(res)}`);
+           if( !res || res.error ) {
+              process.exit(1);
+           }
+           return stat_dir(datastore_str, '/dir1/dir2', true);
+      
+      }, (error) => {console.log("stat dir /dir1 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`stat_dir result: ${JSON.stringify(res)}`);
+           if( !res || res.error ) {
+              process.exit(1);
+           }
+            
+           return delete_datastore(datastore_str);
+      }, (error) => {console.log("stat dir /dir1/dir2 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           console.log(`delete datastore result: ${JSON.stringify(res)}`);
+           if( !res ) {
+              process.exit(1);
+           }
+           process.exit(0);
+      }, (error) => {console.log("delete datastore failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);});
 }
 else {
    console.log("No command given");
@@ -353,5 +591,3 @@ else {
    console.log(`command = ${command}`);
    assert(0);
 }
-
-console.log(JSON.stringify(res));
