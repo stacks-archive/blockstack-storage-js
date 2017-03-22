@@ -8,6 +8,7 @@ import {
    MUTABLE_DATUM_FILE_TYPE,
    MUTABLE_DATUM_INODE_HEADER_SCHEMA,
    URI_RECORD_SCHEMA,
+   MUTABLE_DATUM_DIR_IDATA_SCHEMA,
 } from './schemas';
 
 const assert = require('assert');
@@ -29,12 +30,27 @@ const BLOCKSTACK_STORAGE_PROTO_VERSION = 1;
 export function hash_data_payload( payload_buffer ) {
    var hash = crypto.createHash('sha256');
    
-   h.update(`${payload_buffer.length}`);
-   h.update(payload_buffer);
-   h.update(',');
+   hash.update(`${payload_buffer.length}:`);
+   hash.update(payload_buffer);
+   hash.update(',');
 
-   return h.digest('hex');
+   return hash.digest('hex');
 }
+
+/*
+ * Hash raw data
+ * @param payload_buffer (Buffer) the buffer to hash
+ *
+ * Return the sha256
+ */
+export function hash_raw_data( payload_buffer ) {
+   var hash = crypto.createHash('sha256');
+
+   hash.update(payload_buffer);
+   
+   return hash.digest('hex');
+}
+
 
 /*
  * Decode a hex string into a byte buffer.
@@ -99,7 +115,7 @@ export function sign_raw_data( payload_buffer, privkey_hex, hash ) {
    var privkey = decode_privkey(privkey_hex);
    
    if( !hash ) {
-       hash = hash_data_payload(payload_buffer);
+       hash = hash_raw_data(payload_buffer);
    }
 
    var sig = ec.sign(hash, privkey, {canonical: true});
@@ -113,13 +129,13 @@ export function sign_raw_data( payload_buffer, privkey_hex, hash ) {
  * Sign a data payload and its length.
  * Specifically sign `${payload.length}:${payload},`
  *
- * @payload_buffer (Buffer) the buffer to sign
+ * @payload_string (String) the string to sign
  * @privkey_hex (String) the hex-encoded private key
  *
  * Return the base64-encoded signature
  */
-export function sign_data_payload( payload_buffer, privkey_hex ) {
-   return sign_raw_data( Buffer.concat( [Buffer.from(`${payload_buffer.len}:`), payload_buffer, Buffer.from(',')] ) );
+export function sign_data_payload( payload_string, privkey_hex ) {
+   return sign_raw_data( Buffer.concat( [Buffer.from(`${payload_string.length}:`), Buffer.from(payload_string), Buffer.from(',')] ), privkey_hex );
 }
 
 
@@ -133,7 +149,7 @@ export function sign_data_payload( payload_buffer, privkey_hex ) {
  * Returns the fully-qualified data ID
  */
 export function make_fq_data_id( device_id, data_id ) {
-   return escape(`${device_id}:${data_id.replace('/', '\\x2f')}`);
+   return escape(`${device_id}:${data_id}`.replace('/', '\\x2f'));
 }
 
 
@@ -147,11 +163,11 @@ export function make_fq_data_id( device_id, data_id ) {
  *
  * Returns an mutable data payload object.
  */
-export function make_mutable_data_blob( data_id, data_payload, version, device_id ) {
-    var fq_data_id = make_fq_data_id( data_id, device_id );
+export function make_mutable_data_info( data_id, data_payload, device_id, version ) {
+    var fq_data_id = make_fq_data_id( device_id, data_id );
     var timestamp = new Date().getTime();
     
-    ret = {
+    var ret = {
        'fq_data_id': fq_data_id,
        'data': data_payload,
        'version': version,
@@ -184,7 +200,7 @@ export function make_data_tombstone( tombstone_payload ) {
  */
 export function make_mutable_data_tombstones( device_ids, data_id ) {
     var ts = [];
-    for (device_id of device_ids) {
+    for (var device_id of device_ids) {
        ts.push( make_data_tombstone( make_fq_data_id(device_id, data_id) ));
     }
     return ts;
@@ -237,7 +253,7 @@ export function sign_data_tombstone( tombstone, privkey ) {
  */
 export function sign_mutable_data_tombstones( tombstones, privkey ) {
     var sts = [];
-    for (ts of tombstones) {
+    for (var ts of tombstones) {
        sts.push( sign_data_tombstone(ts, privkey) );
     };
     return sts;
@@ -257,7 +273,7 @@ export function sign_mutable_data_tombstones( tombstones, privkey ) {
  *
  * Returns an object encoding an inode header.
  */
-export function make_inode_header_blob( datastore_id, inode_type, owner_id, inode_uuid, data_hash, version, device_id ) {
+export function make_inode_header_blob( datastore_id, inode_type, owner_id, inode_uuid, data_hash, device_id, version ) {
    
    var header = {
       'type': inode_type,
@@ -268,11 +284,11 @@ export function make_inode_header_blob( datastore_id, inode_type, owner_id, inod
       'proto_version': BLOCKSTACK_STORAGE_PROTO_VERSION, 
    };
 
-   inspector.validate(MUTABLE_DATUM_INODE_HEADER_SCHEMA, ret);
+   inspector.validate(MUTABLE_DATUM_INODE_HEADER_SCHEMA, header);
    
    var inode_data_id = `${datastore_id}.${inode_uuid}.hdr`;
    var inode_data_payload = json_stable_serialize(header);
-   var inode_header_blob = make_mutable_data_blob( inode_data_id, inode_data_payload, version, device_id );
+   var inode_header_blob = make_mutable_data_info( inode_data_id, inode_data_payload, device_id, version );
    return json_stable_serialize(inode_header_blob);
 }
 
@@ -288,7 +304,7 @@ export function make_inode_header_blob( datastore_id, inode_type, owner_id, inod
  *
  * Returns an object encoding a directory's header and idata
  */
-export function make_dir_inode_info( datastore_id, owner_id, inode_uuid, dir_listing, device_id, version ) {
+export function make_dir_inode_blob( datastore_id, owner_id, inode_uuid, dir_listing, device_id, version ) {
    
    inspector.validate(MUTABLE_DATUM_DIR_IDATA_SCHEMA, dir_listing);
    var idata_payload = json_stable_serialize(dir_listing);
@@ -298,7 +314,7 @@ export function make_dir_inode_info( datastore_id, owner_id, inode_uuid, dir_lis
       version = 1;
    }
    
-   var header_blob = make_inode_header_blob( datastore_id, MUTABLE_DATUM_DIR_TYPE, owner_id, inode_uuid, data_hash, version, device_id );
+   var header_blob = make_inode_header_blob( datastore_id, MUTABLE_DATUM_DIR_TYPE, owner_id, inode_uuid, idata_hash, device_id, version );
    return {'header': header_blob, 'idata': idata_payload};
 }
 
@@ -314,9 +330,9 @@ export function make_dir_inode_info( datastore_id, owner_id, inode_uuid, dir_lis
  *
  * Returns an object encoding a file's header
  */
-export function make_file_inode_info( datastore_id, owner_id, inode_uuid, data_hash, device_id, version ) {
+export function make_file_inode_blob( datastore_id, owner_id, inode_uuid, data_hash, device_id, version ) {
    
-   var header_blob = make_inode_header_blob( datastore_id, MUTABLE_DATUM_FILE_TYPE, owner_id, inode_uuid, data_hash, version, device_id );
+   var header_blob = make_inode_header_blob( datastore_id, MUTABLE_DATUM_FILE_TYPE, owner_id, inode_uuid, data_hash, device_id, version );
    return {'header': header_blob}
 }
 
@@ -330,7 +346,7 @@ export function make_file_inode_info( datastore_id, owner_id, inode_uuid, data_h
  */
 export function get_child_version(parent_dir, child_name) {
    assert(parent_dir['idata'][child_name]);
-   return parent_dir['idata'][child_name][version];
+   return parent_dir['idata'][child_name].version;
 }
 
 
@@ -347,7 +363,7 @@ export function get_child_version(parent_dir, child_name) {
  */
 export function inode_dir_link( parent_dir, child_type, child_name, child_uuid, exists ) {
    
-   assert(parent_dir['type'] == MUTABLE_DATUM_TYPE_DIR);
+   assert(parent_dir['type'] == MUTABLE_DATUM_DIR_TYPE);
    assert(parent_dir['idata']);
 
    if( !exists ) {
@@ -380,9 +396,9 @@ export function inode_dir_link( parent_dir, child_type, child_name, child_uuid, 
  */
 export function inode_dir_unlink( parent_dir, child_name ) {
 
-   assert(parent_dir['type'] == MUTABLE_DATUM_TYPE_DIR);
+   assert(parent_dir['type'] == MUTABLE_DATUM_DIR_TYPE);
    assert(parent_dir['idata']);
-   assert(!Object.keys(parent_dir['idata']).includes(child_name));
+   assert(Object.keys(parent_dir['idata']).includes(child_name));
 
    delete parent_dir['idata'][child_name];
    parent_dir['version'] += 1;
