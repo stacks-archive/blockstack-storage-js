@@ -12,13 +12,13 @@ export function create_datastore( privkey, session, device_id, all_device_ids, d
        drivers = JSON.parse(drivers);
    }
    else {
-      drivers = ['disk'];
+       drivers = ['disk'];
    }
 
    console.log(`create_datastore(${privkey}, ${session}, ${device_id}, ${all_device_ids})`);
 
    var info = datastore.datastore_create_mkinfo('datastore', privkey, drivers, device_id, all_device_ids );
-   var res = datastore.datastore_create( 'localhost', session, info['datastore_info'], info['datastore_sigs'] );
+   var res = datastore.datastore_create( 'localhost:6270', session, info );
    return res;
 }
 
@@ -27,7 +27,7 @@ export function create_datastore( privkey, session, device_id, all_device_ids, d
 export function get_datastore(session, datastore_id, privkey, device_id) {
 
    console.log(`get_datastore(${session}, ${datastore_id}, ${privkey}, ${device_id}`);
-   var res = datastore.datastore_connect( 'localhost', session, datastore_id, privkey, device_id );
+   var res = datastore.datastore_connect( 'localhost:6270', session, datastore_id, privkey, device_id );
    return res;
 }
 
@@ -39,7 +39,7 @@ export function delete_datastore(ds_str) {
    var ds = JSON.parse(ds_str);
 
    console.log(`delete_datastore(${ds.privkey_hex}`);
-   var info = datastore_delete_mkinfo(ds);
+   var info = datastore.datastore_delete_mkinfo(ds);
    return datastore.datastore_delete(ds, info['datastore_tombstones'], info['root_tombstones']);
 }
 
@@ -78,7 +78,7 @@ export function datastore_putfile(ds_str, path, data_str, extended, force) {
    };
 
    console.log(`putfile(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
-   return datastore.putfile(ds, path, opts);
+   return datastore.putfile(ds, path, Buffer.from(data_str), opts);
 }
 
 
@@ -114,7 +114,7 @@ export function datastore_mkdir(ds_str, path, extended, force) {
    };
 
    console.log(`mkdir(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
-   return datastore.getfile(ds, path, opts);
+   return datastore.mkdir(ds, path, opts);
 }
 
 
