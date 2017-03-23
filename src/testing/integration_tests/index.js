@@ -27,10 +27,16 @@ export function create_datastore( privkey, session, device_id, all_device_ids, d
 export function get_datastore(session, datastore_id, privkey, device_id) {
 
    console.log(`get_datastore(${session}, ${datastore_id}, ${privkey}, ${device_id}`);
-   var res = datastore.datastore_connect( 'localhost:6270', session, datastore_id, privkey, device_id );
+   var res = datastore.datastore_connect( 'localhost:6270', session, privkey, device_id );
    return res;
 }
 
+
+// get or create 
+export function get_or_create_datastore( hostport, privkey, session, this_device_id, all_device_ids, drivers ) {
+   console.log(`get_or_create_datastore(${hostport}, ${privkey}, ${session}, ${this_device_id}, ${all_device_ids}, ${drivers})`);
+   return datastore.datastore_get_or_create(hostport, privkey, session, this_device_id, all_device_ids, drivers);
+}
 
 // delete datastore 
 export function delete_datastore(ds_str) {
