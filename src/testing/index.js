@@ -10,7 +10,8 @@ import {
    datastore_getfile,
    datastore_putfile,
    datastore_deletefile,
-   datastore_stat
+   datastore_stat,
+   get_or_create_datastore
 } from './integration_tests';
 
 import {
@@ -27,22 +28,6 @@ const http = require('http');
 const jsontokens = require('jsontokens');
 const BigInteger = require('bigi');
 const Promise = require('promise');
-
-Promise.sequence = function (chain) {
-    var results = [];
-    var entries = chain;
-    if (entries.entries) entries = entries.entries();
-    return new Promise(function (yes, no) {
-        var next = function () {
-            var entry = entries.next();
-            if(entry.done) yes(results);
-            else {
-                results.push(entry.value[1]().then(next, function() { no(results); } ));
-            }
-        };
-        next();
-    });
-};
 
 var args = process.argv.slice(2);
 assert(args.length > 0);
@@ -284,24 +269,25 @@ else if( command == 'unittest' ) {
               console.log("failed to authenticate");
               process.exit(1);
            }
-   
-           return create_datastore(datastore_privkey_hex, session_token, device_id, JSON.stringify([device_id]), JSON.stringify(['disk']));
+
+           return get_or_create_datastore("localhost:6270", datastore_privkey_hex, session_token, device_id, [device_id], ['disk']);
 
       }, (error) => {console.log("get session token failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
        
-           console.log(`create_datastore result: ${JSON.stringify(res)}`);
+           console.log(`get_or_create_datastore (create) result: ${JSON.stringify(res)}`);
            if( res.error ) {
               console.log(res);
               process.exit(1);
            }
+        
+           // make sure it's idempotent
+           return get_or_create_datastore("localhost:6270", datastore_privkey_hex, session_token, device_id, [device_id], ['disk']);
 
-           return get_datastore(session_token, datastore_id, datastore_privkey_hex, device_id);
-
-      }, (error) => {console.log("create_datastore failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      }, (error) => {console.log("get_or_create_datastore (create) failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
-           console.log(`get_datastore result: ${JSON.stringify(res)}`);
+           console.log(`get_or_create_datastore (get) result: ${JSON.stringify(res)}`);
            if( res.error ) {
               console.log(res);
               console.log("exiting");
@@ -313,7 +299,7 @@ else if( command == 'unittest' ) {
 
            return datastore_mkdir(datastore_str, '/dir1');
 
-      }, (error) => {console.log("get datastore failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      }, (error) => {console.log("get_or_create_datastore (get) failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
            console.log(`datastore_mkdir result: ${JSON.stringify(res)}`);
