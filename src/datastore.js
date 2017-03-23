@@ -69,8 +69,12 @@ function http_request(options, result_schema, body) {
          response.on('end', function() {
             var str = Buffer.concat(strbuf).toString();
             var resp = null;
+            var is_json = false;
+            if( response.headers['content-type'] == 'application/json' ) {
+               is_json = true;
+            }
 
-            if( result_schema != 'bytes' ) {
+            if( is_json ) {
                resp = JSON.parse(str);
             }
             else {
@@ -80,7 +84,7 @@ function http_request(options, result_schema, body) {
             str = null;
             strbuf = null;
 
-            if( result_schema && result_schema != 'bytes' ) {
+            if( result_schema && is_json ) {
                try {
                   inspector.validate(result_schema, resp);
                }
@@ -384,14 +388,18 @@ export function datastore_delete( ds, ds_tombstones, root_tombstones ) {
  */
 export function datastore_connect( blockstack_hostport, blockstack_session_token, datastore_id, data_privkey_hex, device_id ) {
 
-   var hostinfo = split_hostport(blockstack_hostport);
+   if( data_privkey_hex ) {
+      datastore_id = datastore_get_id(get_pubkey_hex(data_privkey_hex));
+   }
 
+   var hostinfo = split_hostport(blockstack_hostport);
+   
    var ctx = {
       'host': hostinfo.host,
       'port': hostinfo.port,
       'session_token': blockstack_session_token,
       'device_id': device_id,
-      'datastore_id': datastore_get_id( get_pubkey_hex( data_privkey_hex ) ),
+      'datastore_id': datastore_id,
       'privkey_hex': data_privkey_hex,
       'datastore': null,
    };
@@ -408,8 +416,61 @@ export function datastore_connect( blockstack_hostport, blockstack_session_token
    }
 
    return http_request(options, DATASTORE_RESPONSE_SCHEMA).then((ds) => {
-      ctx['datastore'] = ds.datastore;
-      return ctx;
+      if( !ds || ds.error ) {
+         return ds;
+      }
+      else {
+         ctx['datastore'] = ds.datastore;
+         return ctx;
+      }
+   });
+}
+
+
+/*
+ * Get or create a datastore.
+ * Asynchronous, returns a Promise
+ *
+ * @param hostport (String) "host:port" string
+ * @param privkey (String) hex-encoded ECDSA private key
+ * @param this_device_id (String) a unique identifier for this device.
+ * @param all_device_ids (Array) all devices who can put data to this datastore, if we create it.
+ * @param drivers (Array) a list of all drivers this datastore will use, if we create it.
+ *
+ * Returns a Promise that yields a datastore connection, or an error object with .error defined.
+ *
+ */
+export function datastore_get_or_create( hostport, privkey, session, this_device_id, all_device_ids, drivers ) {
+   return datastore_connect(hostport, session, null, privkey, this_device_id).then(
+
+   (datastore_ctx) => {
+      if( datastore_ctx.error && datastore_ctx.errno == 2 ) {
+         // does not exist
+         var info = datastore_create_mkinfo('datastore', privkey, drivers, this_device_id, all_device_ids );
+
+         // go create it
+         return datastore_create( hostport, session, info ).then(
+            (res) => {
+               if( res.error ) {
+                  return res;
+               }
+
+               // connect to it now
+               return datastore_connect( hostport, session, null, privkey, this_device_id );
+            },
+            (error) => {
+               return {'error': 'Failed to create datastore'}
+            });
+
+      }
+      else {
+         // exists
+         return datastore_ctx;
+      }
+   },
+
+   (error) => {
+      return {'error': 'Failed to connect to storage endpoint'}
    });
 }
 
@@ -619,7 +680,7 @@ export function getfile(ds, path, opts) {
       'path': `/v1/stores/${datastore_id}/files?path=${escape(sanitize_path(path))}&idata=1&device_ids=${device_list}`,
    };
 
-   var schema = 'bytes';
+   var schema = SUCCESS_FAIL_SCHEMA;
 
    if(!opts) {
       opts = {};
@@ -763,7 +824,7 @@ export function get_parent(ds, path, opts) {
  *
  * @param ds (Object) a datastore context
  * @param path (String) the path to the file to create (must not exist)
- * @param file_buffer (Buffer) the file contents
+ * @param file_buffer (Buffer or String) the file contents
  *
  * Asynchronous; returns a Promise
  */
@@ -776,6 +837,8 @@ export function putfile(ds, path, file_buffer) {
    path = sanitize_path(path);
    var child_name = basename(path);
 
+   assert(typeof(file_buffer) == 'string' || (file_buffer instanceof Buffer));
+
    // get parent dir 
    return get_parent(ds, path).then(
       (parent_dir) => {
@@ -785,7 +848,15 @@ export function putfile(ds, path, file_buffer) {
          }
 
          // make the file inode information
-         var file_payload = file_buffer.toString('base64');
+         var file_payload = file_buffer;
+         if( typeof(file_payload) != 'string' ) {
+            // buffer
+            file_payload = file_buffer.toString('base64');
+         }
+         else {
+            file_payload = Buffer.from(file_buffer).toString('base64');
+         }
+
          var file_hash = hash_data_payload( file_payload );
          var inode_uuid = null;
          var new_parent_dir_inode = null;
@@ -796,7 +867,7 @@ export function putfile(ds, path, file_buffer) {
 
             // existing; no directory change
             inode_uuid = parent_dir['idata'][child_name]['uuid'];
-            new_parent_dir_inode = inode_dir_link(parent_dir, MUTABLE_DATUM_TYPE_FILE, child_name, inode_uuid, true );
+            new_parent_dir_inode = inode_dir_link(parent_dir, MUTABLE_DATUM_FILE_TYPE, child_name, inode_uuid, true );
          }
          else {
 
