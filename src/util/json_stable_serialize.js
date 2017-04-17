@@ -2,7 +2,7 @@
 
 var json = typeof JSON !== 'undefined' ? JSON : require('jsonify');
 
-export function json_stable_serialize(obj, opts) {
+export function jsonStableSerialize(obj, opts) {
     if (!opts) opts = {};
     if (typeof opts === 'function') opts = { cmp: opts };
     var space = opts.space || '';
@@ -21,7 +21,7 @@ export function json_stable_serialize(obj, opts) {
     })(opts.cmp);
 
     var seen = [];
-    return (function json_stable_serialize (parent, key, node, level) {
+    return (function jsonStableSerialize (parent, key, node, level) {
         var indent = space ? ('\n' + new Array(level + 1).join(space)) : '';
         var colonSeparator = space ? ': ' : ':';
 
@@ -40,7 +40,7 @@ export function json_stable_serialize(obj, opts) {
         if (isArray(node)) {
             var out = [];
             for (var i = 0; i < node.length; i++) {
-                var item = json_stable_serialize(node, i, node[i], level+1) || json.stringify(null);
+                var item = jsonStableSerialize(node, i, node[i], level+1) || json.stringify(null);
                 out.push(indent + space + item);
             }
             return '[' + out.join(',') + indent + ']';
@@ -56,7 +56,7 @@ export function json_stable_serialize(obj, opts) {
             var out = [];
             for (var i = 0; i < keys.length; i++) {
                 var key = keys[i];
-                var value = json_stable_serialize(node, key, node[key], level+1);
+                var value = jsonStableSerialize(node, key, node[key], level+1);
 
                 if(!value) continue;
 
