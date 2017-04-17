@@ -4,12 +4,13 @@
   "description": "The Blockstack Javascript library for storage.",
   "main": "lib/index",
   "scripts": {
-    "browserify": "./node_modules/.bin/browserify lib/index.js --standalone blockstack-storage -o ./lib/blockstack-storage-bundle.js",
+    "browserify": "./node_modules/.bin/browserify lib/index.js --standalone blockstack -o ./tests/storageTests/bundle.js",
     "compile": "rm -rf lib; babel --presets es2015 src -d lib",
+    "compile-tests": "rm -rf tests/storageTests/lib; babel --presets es2015 tests/storageTests/src -d tests/storageTests/lib",
     "prepublish": "npm run compile",
     "release": "npm version patch && npm publish",
-    "test": "npm run compile; npm run browserify; node lib/testing/index.js",
-    "browser-test": "npm run compile; npm run browserify; node server.js"
+    "dev-build": "npm run compile; npm run compile-tests; npm run browserify;",
+    "integration-test-storage": "npm run compile; npm run compile-tests; npm run browserify; node ./tests/storageTests/lib/index.js"
   },
   "repository": {
     "type": "git",
@@ -44,17 +45,12 @@
   "contributors": [
     {
       "name": "Jude Nelson"
-    },
-    {
-      "name": "Ryan Shea"
-    },
-    {
-      "name": "Larry Salibra"
     }
   ],
   "devDependencies": {
     "babel-cli": "^6.4.5",
     "babel-preset-es2015": "^6.3.13",
+    "blockstack": "^0.2.22",
     "blue-tape": "^1.0.0",
     "browserify": "^13.1.1",
     "express": "^4.15.0",
@@ -63,11 +59,11 @@
     "tape": "^4.6.3"
   },
   "dependencies": {
+    "ajv": "^4.11.5",
     "bitcoinjs-lib": "^2.3.0",
     "elliptic": "^6.4.0",
+    "isomorphic-fetch": "^2.2.1",
     "jsontokens": "^0.7.4",
-    "sprintf-js": "^1.0.3",
-    "schema-inspector": "^1.6.4",
     "uuid": "^3.0.1"
   }
 }
