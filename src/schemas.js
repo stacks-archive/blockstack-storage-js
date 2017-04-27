@@ -50,6 +50,20 @@ export const MUTABLE_DATUM_SCHEMA_BASE_PROPERTIES = {
         type: 'string',
         pattern: OP_UUID_PATTERN,
     },
+    readers: {
+        type: 'array',
+        items: {
+            type: 'string',
+            pattern: OP_ADDRESS_PATTERN,
+        },
+    },
+    reader_pubkeys: {
+        type: 'array',
+        items: {
+           type: 'string',
+           pattern: OP_HEX_PATTERN,
+        },
+    },
     version: {
         type: 'integer',
     },
@@ -108,14 +122,14 @@ export const MUTABLE_DATUM_INODE_HEADER_SCHEMA = {
     type: 'object',
     properties: MUTABLE_DATUM_SCHEMA_HEADER_PROPERTIES,
     additionalProperties: false,
-    required: Object.keys(MUTABLE_DATUM_SCHEMA_HEADER_PROPERTIES),
+    required: Object.keys(MUTABLE_DATUM_SCHEMA_HEADER_PROPERTIES).filter(function (x) { return x != 'reader_pubkeys';}),  // reader_pubkeys is optional
 };
 
 export const MUTABLE_DATUM_FILE_SCHEMA = {
     type: 'object',
     properties: MUTABLE_DATUM_FILE_SCHEMA_PROPERTIES,
     additionalProperties: false,
-    required: Object.keys(MUTABLE_DATUM_FILE_SCHEMA_PROPERTIES),
+    required: Object.keys(MUTABLE_DATUM_FILE_SCHEMA_PROPERTIES).filter(function (x) { return x != 'reader_pubkeys';}), // reader_pubkeys is optional
 };
 
 export const MUTABLE_DATUM_DIR_SCHEMA = {
