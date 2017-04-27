@@ -264,6 +264,7 @@ export function makeInodeHeaderBlob( datastore_id, inode_type, owner_id, inode_u
       'type': inode_type,
       'owner': owner_id,
       'uuid': inode_uuid,
+      'readers': [],    // unused for now
       'data_hash': data_hash,
       'version': version,
       'proto_version': BLOCKSTACK_STORAGE_PROTO_VERSION, 
