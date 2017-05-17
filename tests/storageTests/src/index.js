@@ -48,7 +48,7 @@ var res = null;
 
 function dir_expect(dir, names) {
    for (var name of names) {
-      if( !Object.keys(dir).includes(name) ) {
+      if( !Object.keys(dir['children']).includes(name) ) {
          return false;
       }
    }

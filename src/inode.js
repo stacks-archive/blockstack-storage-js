@@ -105,7 +105,25 @@ export function signRawData( payload_buffer, privkey_hex, hash ) {
    const sig = ec.sign(hash, privkey, {canonical: true});
    
    // use signature encoding compatible with Blockstack
-   const sigb64 = Buffer.concat( [sig.r.toBuffer(), sig.s.toBuffer()] ).toString('base64');
+   let r_buf = sig.r.toBuffer().toString('hex');
+   let s_buf = sig.s.toBuffer().toString('hex');
+
+   if(r_buf.length < 64) {
+      while(r_buf.length < 64) {
+         r_buf = "0" + r_buf;
+      }
+   }
+
+   if( s_buf.length < 64) {
+      while(s_buf.length < 64) {
+         s_buf = "0" + s_buf;
+      }
+   }
+
+   const sig_buf_hex = r_buf + s_buf;
+   assert(sig_buf_hex.length == 128);
+
+   const sigb64 = Buffer.from(sig_buf_hex, 'hex').toString('base64');
    return sigb64;
 }
 
@@ -306,7 +324,7 @@ export function makeDirInodeBlob( datastore_id, owner_id, inode_uuid, dir_listin
    const ajv = new Ajv();
    let valid = null;
    try {
-      valid = ajv.validate(MUTABLE_DATUM_DIR_IDATA_SCHEMA, dir_listing);
+      valid = ajv.validate(MUTABLE_DATUM_DIR_IDATA_SCHEMA.properties.children, dir_listing);
       assert(valid);
    }
    catch(e) {
@@ -315,15 +333,25 @@ export function makeDirInodeBlob( datastore_id, owner_id, inode_uuid, dir_listin
       throw e;
    }
 
-   const idata_payload = jsonStableSerialize(dir_listing);
-   const idata_hash = hashDataPayload(idata_payload);
-
    if(!version) {
       version = 1;
    }
-   
+
+   const empty_hash = '0000000000000000000000000000000000000000000000000000000000000000';
+   const internal_header_blob = makeInodeHeaderBlob( datastore_id, MUTABLE_DATUM_DIR_TYPE, owner_id, inode_uuid, empty_hash, device_id, version );
+    
+   // recover header 
+   const internal_header = JSON.parse( JSON.parse(internal_header_blob).data );
+   const idata_payload = {
+      children: dir_listing,
+      header: internal_header,
+   };
+
+   const idata_payload_str = jsonStableSerialize(idata_payload);
+   const idata_hash = hashDataPayload(idata_payload_str);
+
    const header_blob = makeInodeHeaderBlob( datastore_id, MUTABLE_DATUM_DIR_TYPE, owner_id, inode_uuid, idata_hash, device_id, version );
-   return {'header': header_blob, 'idata': idata_payload};
+   return {'header': header_blob, 'idata': idata_payload_str};
 }
 
 
@@ -353,8 +381,8 @@ export function makeFileInodeBlob( datastore_id, owner_id, inode_uuid, data_hash
  * Raises if there is no child
  */
 export function getChildVersion(parent_dir, child_name) {
-   assert(parent_dir['idata'][child_name]);
-   return parent_dir['idata'][child_name].version;
+   assert(parent_dir['idata']['children'][child_name]);
+   return parent_dir['idata']['children'][child_name].version;
 }
 
 
@@ -373,9 +401,10 @@ export function inodeDirLink( parent_dir, child_type, child_name, child_uuid, ex
    
    assert(parent_dir['type'] === MUTABLE_DATUM_DIR_TYPE);
    assert(parent_dir['idata']);
+   assert(parent_dir['idata']['children']);
 
    if( !exists ) {
-       assert(!Object.keys(parent_dir['idata']).includes(child_name));
+       assert(!Object.keys(parent_dir['idata']['children']).includes(child_name));
    }
 
    const new_dirent = {
@@ -384,11 +413,11 @@ export function inodeDirLink( parent_dir, child_type, child_name, child_uuid, ex
       version: 1,
    };
 
-   if(parent_dir['idata']['version']) {
-      new_dirent.version = parent_dir['idata']['version'] + 1;
+   if(parent_dir['idata']['children']['version']) {
+      new_dirent.version = parent_dir['idata']['children']['version'] + 1;
    }
 
-   parent_dir['idata'][child_name] = new_dirent;
+   parent_dir['idata']['children'][child_name] = new_dirent;
    parent_dir['version'] += 1;
    return parent_dir;
 }
@@ -406,9 +435,11 @@ export function inodeDirUnlink( parent_dir, child_name ) {
 
    assert(parent_dir['type'] === MUTABLE_DATUM_DIR_TYPE);
    assert(parent_dir['idata']);
-   assert(Object.keys(parent_dir['idata']).includes(child_name));
+   assert(parent_dir['idata']['children']);
 
-   delete parent_dir['idata'][child_name];
+   assert(Object.keys(parent_dir['idata']['children']).includes(child_name));
+
+   delete parent_dir['idata']['children'][child_name];
    parent_dir['version'] += 1;
    return parent_dir;
 }

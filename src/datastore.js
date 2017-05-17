@@ -106,6 +106,10 @@ function httpRequest(options, result_schema, body) {
     return fetch(url, options).then(
       (response) => {
 
+         if(response.status >= 500) {
+            throw Error(response.statusText);
+         }
+
          let resp = null;
          if (response.headers.get('content-type') === 'application/json') {
             return response.json().then( (resp) => {
@@ -143,7 +147,7 @@ function getPubkeyHex(privkey_hex) {
 /*
  * Get device list from device IDs
  */
-function getDeviceList( device_ids) {
+function getDeviceList(device_ids) {
    const escaped_device_ids = [];
    for (let devid of device_ids) {
       escaped_device_ids.push(escape(devid));
@@ -262,7 +266,8 @@ export function datastoreCreateRequest( ds_type, ds_private_key_hex, drivers, de
       'datastore_info': {
          'datastore_id': datastore_id,
          'datastore_blob': datastore_str, 
-         'root_blob': root_blob_info.header,
+         'root_blob_header': root_blob_info.header,
+         'root_blob_idata': root_blob_info.idata,
       },
       'datastore_sigs': {
          'datastore_sig': datastore_sig, 
@@ -288,7 +293,8 @@ export function datastoreCreate( blockstack_hostport, blockstack_session_token, 
    const payload = {
       'datastore_info': {
           'datastore_blob': datastore_request.datastore_info.datastore_blob,
-          'root_blob': datastore_request.datastore_info.root_blob,
+          'root_blob_header': datastore_request.datastore_info.root_blob_header,
+          'root_blob_idata': datastore_request.datastore_info.root_blob_idata,
       },
       'datastore_sigs': {
           'datastore_sig': datastore_request.datastore_sigs.datastore_sig,
@@ -397,7 +403,7 @@ export function datastoreDelete(ds, ds_tombstones, root_tombstones) {
  *      .host: blockstack host
  *      .datastore: datastore object
  */
-export function datastoreConnect( blockstack_hostport, blockstack_session_token, datastore_id, data_privkey_hex, device_id) {
+export function datastoreConnect(blockstack_hostport, blockstack_session_token, datastore_id, data_privkey_hex, device_id) {
 
    if (data_privkey_hex) {
       datastore_id = datastoreGetId(getPubkeyHex(data_privkey_hex));
@@ -444,15 +450,42 @@ export function datastoreConnect( blockstack_hostport, blockstack_session_token,
  * Asynchronous, returns a Promise
  *
  * @param hostport (String) "host:port" string
- * @param privkey (String) hex-encoded ECDSA private key
- * @param this_device_id (String) a unique identifier for this device.
- * @param all_device_ids (Array) all devices who can put data to this datastore, if we create it.
  * @param drivers (Array) a list of all drivers this datastore will use, if we create it.
+ * @param privkey (String) OPTIONAL: hex-encoded ECDSA private key
+ * @param session (String) OPTIONAL: the Blockstack Core session
+ * @param this_device_id (String) OPTIONAL: a unique identifier for this device.
+ * @param all_device_ids (Array) OPTIONAL: all devices who can put data to this datastore, if we create it.
  *
  * Returns a Promise that yields a datastore connection, or an error object with .error defined.
  *
  */
-export function datastoreConnectOrCreate( hostport, privkey, session, this_device_id, all_device_ids, drivers) {
+export function datastoreConnectOrCreate(hostport, drivers, privkey=null, session=null, this_device_id=null, all_device_ids=[]) {
+   
+   if(!privkey) {
+      const userData = window.localStorage.getItem("blockstack");
+      privkey = userData.privkey;
+      assert(privkey);
+   }
+
+   if(!session) {
+      const userData = window.localStorage.getItem("blockstack");
+      session = userData.session;
+      assert(session);
+   }
+
+   if(!this_device_id) {
+      const userData = window.localStorage.getItem("blockstack");
+      this_device_id = userData.localDeviceId;
+      assert(this_device_id);
+   }
+
+   if(!all_device_ids || all_device_ids.length == 0) {
+      const userData = window.localStorage.getItem("blockstack");
+      all_device_ids = userDta.allDeviceIds;
+      assert(all_device_ids);
+      assert(all_device_ids.length > 0);
+   }
+
    return datastoreConnect(hostport, session, null, privkey, this_device_id).then(
       (datastore_ctx) => {
          if (datastore_ctx.error && datastore_ctx.errno === 2) {
@@ -548,7 +581,7 @@ export function lookup(ds, path, opts) {
  *
  * Asynchronous; returns a Promise
  */
-export function listdir(ds, path, opts) {
+export function listDir(ds, path, opts) {
 
    const datastore_id = ds.datastore_id;
    const device_list = getDeviceList(ds.datastore.device_ids);
@@ -865,24 +898,29 @@ export function putFile(ds, path, file_buffer) {
 
          // make the file inode information
          let file_payload = file_buffer;
+         let file_hash = null;
          if (typeof(file_payload) !== 'string') {
             // buffer
             file_payload = file_buffer.toString('base64');
+            file_hash = hashDataPayload( file_buffer.toString() );
          }
          else {
+            // string
             file_payload = Buffer.from(file_buffer).toString('base64');
+            file_hash = hashDataPayload( file_buffer );
          }
 
-         let file_hash = hashDataPayload( file_payload );
+         assert(file_hash);
+
          let inode_uuid = null;
          let new_parent_dir_inode = null;
          let child_version = null;
 
          // new or existing?
-         if (Object.keys(parent_dir['idata']).includes(child_name)) {
+         if (Object.keys(parent_dir['idata']['children']).includes(child_name)) {
 
             // existing; no directory change
-            inode_uuid = parent_dir['idata'][child_name]['uuid'];
+            inode_uuid = parent_dir['idata']['children'][child_name]['uuid'];
             new_parent_dir_inode = inodeDirLink(parent_dir, MUTABLE_DATUM_FILE_TYPE, child_name, inode_uuid, true );
          }
          else {
@@ -897,11 +935,12 @@ export function putFile(ds, path, file_buffer) {
          const inode_sig = signDataPayload( inode_info['header'], privkey_hex );
 
          // make the directory inode information
-         const new_parent_info = makeDirInodeBlob( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata'], device_id, new_parent_dir_inode['version'] + 1);
+         const new_parent_info = makeDirInodeBlob( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata']['children'], device_id, new_parent_dir_inode['version'] + 1);
          const new_parent_sig = signDataPayload( new_parent_info['header'], privkey_hex );
 
-         // post them 
-         return datastoreOperation(ds, 'putFile', path, [inode_info['header'], new_parent_info['header']], [file_payload, new_parent_info['idata']], [inode_sig, new_parent_sig], []);
+         // post them
+         const new_parent_info_b64 = new Buffer(new_parent_info['idata']).toString('base64');
+         return datastoreOperation(ds, 'putFile', path, [inode_info['header'], new_parent_info['header']], [file_payload, new_parent_info_b64], [inode_sig, new_parent_sig], []);
       },
    );
 }
@@ -932,7 +971,7 @@ export function mkdir(ds, path, parent_dir) {
          }
 
          // must not exist 
-         if (Object.keys(parent_dir['idata']).includes(child_name)) {
+         if (Object.keys(parent_dir['idata']['children']).includes(child_name)) {
             return {'error': 'File or directory exists', 'errno': EEXIST};
          }
 
@@ -943,7 +982,7 @@ export function mkdir(ds, path, parent_dir) {
 
          // make the new parent directory information 
          const new_parent_dir_inode = inodeDirLink(parent_dir, MUTABLE_DATUM_DIR_TYPE, child_name, inode_uuid);
-         const new_parent_info = makeDirInodeBlob( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata'], device_id, new_parent_dir_inode['version'] + 1);
+         const new_parent_info = makeDirInodeBlob( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata']['children'], device_id, new_parent_dir_inode['version'] + 1);
          const new_parent_sig = signDataPayload( new_parent_info['header'], privkey_hex );
 
          // post them 
@@ -979,15 +1018,15 @@ export function deleteFile(ds, path, parent_dir) {
          }
 
          // no longer exists?
-         if (!Object.keys(parent_dir['idata']).includes(child_name)) {
+         if (!Object.keys(parent_dir['idata']['children']).includes(child_name)) {
             return {'error': 'No such file or directory', 'errno': ENOENT};
          }
 
-         const inode_uuid = parent_dir['idata'][child_name];
+         const inode_uuid = parent_dir['idata']['children'][child_name];
 
          // unlink 
          const new_parent_dir_inode = inodeDirUnlink(parent_dir, child_name);
-         const new_parent_info = makeDirInodeBlob( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata'], device_id, new_parent_dir_inode['version'] + 1 );
+         const new_parent_info = makeDirInodeBlob( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata']['children'], device_id, new_parent_dir_inode['version'] + 1 );
          const new_parent_sig = signDataPayload( new_parent_info['header'], privkey_hex );
 
          // make tombstones 
@@ -1027,15 +1066,15 @@ export function rmdir(ds, path, parent_dir) {
          }
 
          // no longer exists?
-         if (!Object.keys(parent_dir['idata']).includes(child_name)) {
+         if (!Object.keys(parent_dir['idata']['children']).includes(child_name)) {
             return {'error': 'No such file or directory', 'errno': ENOENT};
          }
 
-         const inode_uuid = parent_dir['idata'][child_name];
+         const inode_uuid = parent_dir['idata']['children'][child_name];
 
          // unlink 
          const new_parent_dir_inode = inodeDirUnlink(parent_dir, child_name);
-         const new_parent_info = makeDirInodeBlob( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata'], device_id, new_parent_dir_inode['version'] + 1 );
+         const new_parent_info = makeDirInodeBlob( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata']['children'], device_id, new_parent_dir_inode['version'] + 1 );
          const new_parent_sig = signDataPayload( new_parent_info['header'], privkey_hex );
 
          // make tombstones 

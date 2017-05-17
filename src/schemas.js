@@ -78,6 +78,13 @@ MUTABLE_DATUM_SCHEMA_HEADER_PROPERTIES['data_hash'] = {
         pattern: OP_HEX_PATTERN,
 };
 
+export const MUTABLE_DATUM_INODE_HEADER_SCHEMA = {
+    type: 'object',
+    properties: MUTABLE_DATUM_SCHEMA_HEADER_PROPERTIES,
+    additionalProperties: false,
+    required: Object.keys(MUTABLE_DATUM_SCHEMA_HEADER_PROPERTIES).filter(function (x) { return x != 'reader_pubkeys';}),  // reader_pubkeys is optional
+};
+
 export const MUTABLE_DATUM_DIRENT_SCHEMA = {
     type: 'object',
     properties: {
@@ -104,9 +111,17 @@ export const MUTABLE_DATUM_DIRENT_SCHEMA = {
 
 export const MUTABLE_DATUM_DIR_IDATA_SCHEMA = {
     type: 'object',
-    patternProperties: {
-        OP_URLENCODED_NOSLASH_PATTERN: MUTABLE_DATUM_DIRENT_SCHEMA,
+    properties: {
+       children: {
+            type: 'object',
+            patternProperties: {
+                OP_URLENCODED_NOSLASH_PATTERN: MUTABLE_DATUM_DIRENT_SCHEMA,
+            },
+       },
+       header: MUTABLE_DATUM_INODE_HEADER_SCHEMA
     },
+    strict: true,
+    required: ['children', 'header']
 };
 
 export const MUTABLE_DATUM_FILE_SCHEMA_PROPERTIES = Object.assign({}, MUTABLE_DATUM_SCHEMA_BASE_PROPERTIES);
@@ -117,13 +132,6 @@ MUTABLE_DATUM_FILE_SCHEMA_PROPERTIES['idata'] = {
 
 export const MUTABLE_DATUM_DIR_SCHEMA_PROPERTIES = Object.assign({}, MUTABLE_DATUM_SCHEMA_BASE_PROPERTIES);
 MUTABLE_DATUM_DIR_SCHEMA_PROPERTIES['idata'] = Object.assign({}, MUTABLE_DATUM_DIR_IDATA_SCHEMA);
-
-export const MUTABLE_DATUM_INODE_HEADER_SCHEMA = {
-    type: 'object',
-    properties: MUTABLE_DATUM_SCHEMA_HEADER_PROPERTIES,
-    additionalProperties: false,
-    required: Object.keys(MUTABLE_DATUM_SCHEMA_HEADER_PROPERTIES).filter(function (x) { return x != 'reader_pubkeys';}),  // reader_pubkeys is optional
-};
 
 export const MUTABLE_DATUM_FILE_SCHEMA = {
     type: 'object',

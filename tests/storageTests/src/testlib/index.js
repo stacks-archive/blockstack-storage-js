@@ -35,7 +35,7 @@ export function GetDatastore(session, datastore_id, privkey, device_id) {
 // get or create 
 export function getOrCreateDatastore( hostport, privkey, session, this_device_id, all_device_ids, drivers ) {
    console.log(`getOrCreateDatastore(${hostport}, ${privkey}, ${session}, ${this_device_id}, ${all_device_ids}, ${drivers})`);
-   return datastore.datastoreConnectOrCreate(hostport, privkey, session, this_device_id, all_device_ids, drivers);
+   return datastore.datastoreConnectOrCreate(hostport, drivers, privkey, session, this_device_id, all_device_ids);
 }
 
 // delete datastore 
@@ -136,8 +136,8 @@ export function datastoreListdir(ds_str, path, extended, force) {
       'force': force,
    };
 
-   console.log(`listdir(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
-   return datastore.listdir(ds, path, opts);
+   console.log(`listDir(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
+   return datastore.listDir(ds, path, opts);
 }
 
 
