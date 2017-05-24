@@ -11,7 +11,6 @@ import {
 } from './schemas';
 
 const assert = require('assert');
-const sprintf = require('sprintf-js');
 const crypto = require('crypto');
 const EC = require('elliptic').ec;
 const ec = EC('secp256k1');
@@ -103,10 +102,12 @@ export function signRawData( payload_buffer, privkey_hex, hash ) {
    }
 
    const sig = ec.sign(hash, privkey, {canonical: true});
-   
+ 
    // use signature encoding compatible with Blockstack
-   let r_buf = sig.r.toBuffer().toString('hex');
-   let s_buf = sig.s.toBuffer().toString('hex');
+   let r_array = sig.r.toArray();
+   let s_array = sig.s.toArray();
+   let r_buf = Buffer.from(r_array).toString('hex');
+   let s_buf = Buffer.from(s_array).toString('hex');
 
    if(r_buf.length < 64) {
       while(r_buf.length < 64) {
@@ -121,6 +122,7 @@ export function signRawData( payload_buffer, privkey_hex, hash ) {
    }
 
    const sig_buf_hex = r_buf + s_buf;
+
    assert(sig_buf_hex.length == 128);
 
    const sigb64 = Buffer.from(sig_buf_hex, 'hex').toString('base64');
