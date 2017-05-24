@@ -43,6 +43,7 @@ const assert = require('assert');
 const Ajv = require('ajv');
 
 const ENOENT = 2;
+const EACCES = 13;
 const EEXIST = 17;
 const ENOTDIR = 20;
 const EREMOTEIO = 121;
@@ -110,6 +111,18 @@ function httpRequest(options, result_schema, body) {
             throw Error(response.statusText);
          }
 
+         if(response.status === 404) {
+            return {'error': 'No such file or directory', 'errno': ENOENT};
+         }
+
+         if(response.status === 403) {
+            return {'error': 'Access denied', 'errno': EACCES};
+         }
+
+         if(response.status === 401) {
+            return {'error': 'Invalid request', 'errno': EINVAL};
+         }
+
          let resp = null;
          if (response.headers.get('content-type') === 'application/json') {
             return response.json().then( (resp) => {
@@ -119,7 +132,7 @@ function httpRequest(options, result_schema, body) {
          else {
             return response.text();
          }
-      }
+      } 
     );
 }
 
@@ -236,7 +249,7 @@ export function datastoreCreateRequest( ds_type, ds_private_key_hex, drivers, de
 
    assert(ds_type === 'datastore' || ds_type === 'collection');
    const root_uuid = uuid4();
-    
+   
    const ds_public_key = getPubkeyHex(ds_private_key_hex);
    const datastore_id = datastoreGetId( ds_public_key );
    const root_blob_info = makeDirInodeBlob( datastore_id, datastore_id, root_uuid, {}, device_id, 1 );
@@ -249,9 +262,10 @@ export function datastoreCreateRequest( ds_type, ds_private_key_hex, drivers, de
       'device_ids': all_device_ids,
       'root_uuid': root_uuid,
    };
-
+    
    const data_id = `${datastore_id}.datastore`;
    const datastore_blob = makeMutableDataInfo( data_id, jsonStableSerialize(datastore_info), device_id, 1 );
+
    const datastore_str = jsonStableSerialize(datastore_blob);
 
    // sign them all
@@ -434,10 +448,10 @@ export function datastoreConnect(blockstack_hostport, blockstack_session_token, 
 
    return httpRequest(options, DATASTORE_RESPONSE_SCHEMA).then((ds) => {
       if (!ds || ds.error) {
+         console.log(`failed to get datastore: ${JSON.stringify(ds)}`);
          return ds;
       }
       else {
-         console.log(`fetched: ${ds} ${typeof ds}`);
          ctx['datastore'] = ds.datastore;
          return ctx;
       }
@@ -488,8 +502,10 @@ export function datastoreConnectOrCreate(hostport, drivers, privkey=null, sessio
 
    return datastoreConnect(hostport, session, null, privkey, this_device_id).then(
       (datastore_ctx) => {
-         if (datastore_ctx.error && datastore_ctx.errno === 2) {
+         if (datastore_ctx.error && datastore_ctx.errno === ENOENT) {
             // does not exist
+            console.log("Datastore does not exist; creating...");
+
             const info = datastoreCreateRequest('datastore', privkey, drivers, this_device_id, all_device_ids );
 
             // go create it
