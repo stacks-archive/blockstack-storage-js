@@ -261,7 +261,7 @@ else if( command == 'unittest' ) {
               process.exit(1);
            }
 
-           return getOrCreateDatastore(['read_local', 'write_local'], 1, session_token, datastore_privkey_hex);
+           return getOrCreateDatastore({'local': 1}, session_token, datastore_privkey_hex);
 
       }, (error) => {console.log("get session token failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
@@ -273,7 +273,7 @@ else if( command == 'unittest' ) {
            }
         
            // make sure it's idempotent
-           return getOrCreateDatastore(['read_local', 'write_local'], 1, session_token, datastore_privkey_hex);
+           return getOrCreateDatastore({'local': 1}, session_token, datastore_privkey_hex);
 
       }, (error) => {console.log("getOrCreateDatastore (create) failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {

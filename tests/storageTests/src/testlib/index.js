@@ -24,9 +24,9 @@ export function createDatastore( privkey, session, device_id, all_device_ids, dr
 
 
 // get or create 
-export function getOrCreateDatastore( storage_classes, num_replicas, session, privkey ) {
-   console.log(`getOrCreateDatastore(${storage_classes}, ${num_replicas}, ${session}, ${privkey})`);
-   return datastore.datastoreConnectOrCreate(storage_classes, num_replicas, session, privkey );
+export function getOrCreateDatastore( replication_strategy, session, privkey ) {
+   console.log(`getOrCreateDatastore(${replication_strategy}, ${session}, ${privkey})`);
+   return datastore.datastoreConnectOrCreate(replication_strategy, session, privkey );
 }
 
 // delete datastore 
