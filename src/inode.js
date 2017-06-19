@@ -191,7 +191,8 @@ export function makeMutableDataInfo( data_id, data_payload, device_id, version )
  * Returns the tombstone (to be fed into the storage driver)
  */
 export function makeDataTombstone( tombstone_payload ) {
-    return `delete:${tombstone_payload}`;
+    const now = parseInt(new Date().getTime() / 1000);
+    return `delete-${now}:${tombstone_payload}`;
 }
 
 
@@ -227,7 +228,7 @@ export function makeInodeTombstones( datastore_id, inode_uuid, device_ids ) {
     const header_id = `${datastore_id}.${inode_uuid}.hdr`;
     const header_tombstones = makeMutableDataTombstones( device_ids, header_id );
 
-    const idata_id = `${datastore_id}.${inode_uuid}.hdr`;
+    const idata_id = `${datastore_id}.${inode_uuid}`;
     const idata_tombstones = makeMutableDataTombstones( device_ids, idata_id );
 
     return header_tombstones.concat(idata_tombstones);
