@@ -41,13 +41,18 @@ const BigInteger = require('bigi');
 const Promise = require('promise');
 const assert = require('assert');
 const Ajv = require('ajv');
+const jsontokens = require('jsontokens');
 
+const EPERM = 1;
 const ENOENT = 2;
 const EACCES = 13;
 const EEXIST = 17;
 const ENOTDIR = 20;
+const EINVAL = 22;
 const EREMOTEIO = 121;
 
+const LOCAL_STORAGE_ID = "blockstack";
+const SUPPORTED_STORAGE_CLASSES = ["read_public", "write_public", "read_private", "write_private", "read_local", "write_local"];
 
 /*
  * Helper method to validate a JSON response
@@ -122,6 +127,10 @@ function httpRequest(options, result_schema, body) {
          if(response.status === 401) {
             return {'error': 'Invalid request', 'errno': EINVAL};
          }
+        
+         if(response.status === 400) {
+            return {'error': 'Operation not permitted', 'errno': EPERM};
+         }
 
          let resp = null;
          if (response.headers.get('content-type') === 'application/json') {
@@ -148,27 +157,42 @@ export function datastoreGetId( ds_public_key_hex) {
 
 
 /*
- * Get a public key (hex) from private key
+ * Get a *uncompressed* public key (hex) from private key
  */
 function getPubkeyHex(privkey_hex) {
    let privkey = BigInteger.fromBuffer( decodePrivateKey(privkey_hex) );
-   let public_key = new bitcoinjs.ECPair(privkey).getPublicKeyBuffer().toString('hex');
-   return public_key;
+   let public_key = new bitcoinjs.ECPair(privkey);
+
+   public_key.compressed = false;
+   let public_key_str = public_key.getPublicKeyBuffer().toString('hex');
+   return public_key_str;
 }
 
 
 /*
- * Get device list from device IDs
+ * Get query string device list from datastore context
  */
-function getDeviceList(device_ids) {
+function getDeviceList(datastore_ctx) {
    const escaped_device_ids = [];
-   for (let devid of device_ids) {
-      escaped_device_ids.push(escape(devid));
+   for (let dk of datastore_ctx.app_public_keys) {
+      escaped_device_ids.push(escape(dk.device_id));
    }
    const res = escaped_device_ids.join(',');
    return res;
 }
 
+
+/*
+ * Get query string public key list from datastore context
+ */
+function getPublicKeyList(datastore_ctx) {
+   const escaped_public_keys = [];
+   for (let dk of datastore_ctx.app_public_keys) {
+      escaped_public_keys.push(escape(dk.public_key));
+   }
+   const res = escaped_public_keys.join(',');
+   return res;
+}
 
 /*
  * Sanitize a path.  Consolidate // to /, and resolve foo/../bar to bar
@@ -383,7 +407,7 @@ export function datastoreDelete(ds, ds_tombstones, root_tombstones) {
       root_tombstones = delete_info['root_tombstones'];
    }
 
-   const device_list = getDeviceList(ds.datastore.device_ids);
+   const device_list = getDeviceList(ds);
    const payload = {
       'datastore_tombstones': ds_tombstones,
       'root_tombstones': root_tombstones,
@@ -412,39 +436,109 @@ export function datastoreDelete(ds, ds_tombstones, root_tombstones) {
  * Look up a datastore and establish enough contextual information to do subsequent storage operations.
  * Asynchronous; returns a Promise
  *
+ * opts is an object that must contain either:
+ * * appPrivateKey (string) the application private key
+ * * (optional) sessionToken (string) the Core session token, OR
+ * * (optional) device_id (string) the device ID
+ * 
+ * OR:
+ *
+ * * blockchainID (string) the blockchain ID of the user whose datastore we're going to access
+ * * appName (string) the name of the application
+ *
+ * TODO: support accessing datastores from other users
+ *
  * Returns an async object whose .end() method returns a datastore connection,
  * with the following properties:
  *      .host: blockstack host
  *      .datastore: datastore object
  */
-export function datastoreConnect(blockstack_hostport, blockstack_session_token, datastore_id, data_privkey_hex, device_id) {
+export function datastoreConnect(opts) {
+
+   const data_privkey_hex = opts.appPrivateKey;
+   let sessionToken = opts.sessionToken;
+
+   // TODO: only support single-user datastore access
+   assert(data_privkey_hex);
+   
+   let datastore_id = null;
+   let device_id = null;
+   let blockchain_id = null;
+   let api_endpoint = null;
+   let app_public_keys = null;
+
+   if (!sessionToken) {
+      // load from user data 
+      const userData = getUserData();
+
+      sessionToken = userData.coreSessionToken;
+      assert(sessionToken);
+   }
+
+   const session = jsontokens.decodeToken(sessionToken).payload;
 
    if (data_privkey_hex) {
       datastore_id = datastoreGetId(getPubkeyHex(data_privkey_hex));
    }
+   else {
+      blockchain_id = opts.blockchainID;
+      const app_name = opts.appName;
 
+      assert(blockchain_id);
+      assert(app_name);
+
+      // TODO: look up the datastore information via Core
+      // TODO: blocked by Core's lack of support for token files
+      // TODO: set device_id, blockchain_id, app_public_keys
+   }
+
+   if (!device_id) {
+      device_id = session.device_id;
+      assert(device_id);
+   }
+
+   if (!api_endpoint) {
+      api_endpoint = session.api_endpoint;
+      assert(api_endpoint);
+   }
+
+   if (!blockchain_id) {
+      blockchain_id = session.blockchain_id;
+      assert(blockchain_id);
+   }
+   
+   if (!app_public_keys) {
+      app_public_keys = session.app_public_keys;
+      assert(app_public_keys);
+   }
+
+   const blockstack_hostport = api_endpoint.split('://').reverse()[0];
    const hostinfo = splitHostPort(blockstack_hostport);
    
    const ctx = {
       'host': hostinfo.host,
       'port': hostinfo.port,
-      'session_token': blockstack_session_token,
+      'blockchain_id': blockchain_id,
       'device_id': device_id,
       'datastore_id': datastore_id,
-      'privkey_hex': data_privkey_hex,
+      'session_token': sessionToken,
+      'app_public_keys': app_public_keys,
+      'session': session,
       'datastore': null,
    };
+ 
+   if (data_privkey_hex) {
+      ctx.privkey_hex = data_privkey_hex;
+   }
 
    const options = {
       'method': 'GET',
       'host': hostinfo.host,
       'port': hostinfo.port,
-      'path': `/v1/stores/${datastore_id}?device_ids=${device_id}`,
+      'path': `/v1/stores/${datastore_id}?device_ids=${device_id}&blockchain_id=${blockchain_id}`,
    }
 
-   if (blockstack_session_token) {
-      options['headers'] = {'Authorization': `bearer ${blockstack_session_token}`};
-   }
+   options['headers'] = {'Authorization': `bearer ${sessionToken}`};
 
    return httpRequest(options, DATASTORE_RESPONSE_SCHEMA).then((ds) => {
       if (!ds || ds.error) {
@@ -460,56 +554,131 @@ export function datastoreConnect(blockstack_hostport, blockstack_session_token, 
 
 
 /*
+ * Get local storage object for Blockstack
+ * Throws on error
+ */
+function getUserData() {
+   const userData = window.localStorage.getItem(LOCAL_STORAGE_ID);
+   assert(userData);
+   return userData;
+}
+
+
+/*
  * Connect to or create a datastore.
  * Asynchronous, returns a Promise
  *
- * @param hostport (String) "host:port" string
- * @param drivers (Array) a list of all drivers this datastore will use, if we create it.
- * @param privkey (String) OPTIONAL: hex-encoded ECDSA private key
- * @param session (String) OPTIONAL: the Blockstack Core session
- * @param this_device_id (String) OPTIONAL: a unique identifier for this device.
- * @param all_device_ids (Array) OPTIONAL: all devices who can put data to this datastore, if we create it.
  *
  * Returns a Promise that yields a datastore connection, or an error object with .error defined.
  *
  */
-export function datastoreConnectOrCreate(hostport, drivers, privkey=null, session=null, this_device_id=null, all_device_ids=[]) {
+export function datastoreConnectOrCreate(storage_classes=["read_public", "write_private"], replicas=1, sessionToken=null, appPrivateKey=null) {
    
-   if(!privkey) {
-      const userData = window.localStorage.getItem("blockstack");
-      privkey = userData.privkey;
-      assert(privkey);
+   if(!sessionToken) {
+      const userData = getUserData();
+
+      sessionToken = userData.coreSessionToken;
+      assert(sessionToken);
    }
 
-   if(!session) {
-      const userData = window.localStorage.getItem("blockstack");
-      session = userData.session;
-      assert(session);
+   if(!appPrivateKey) {
+      const userData = getUserData();
+
+      appPrivateKey = userData.appPrivateKey;
+      assert(appPrivateKey);
    }
 
-   if(!this_device_id) {
-      const userData = window.localStorage.getItem("blockstack");
-      this_device_id = userData.localDeviceId;
-      assert(this_device_id);
+   // sanity check 
+   for (let i = 0; i < storage_classes.length; i++) {
+      let supported = false;
+      for (let j = 0; j < SUPPORTED_STORAGE_CLASSES.length; j++ ) {
+         if (storage_classes[i] === SUPPORTED_STORAGE_CLASSES[j]) {
+            supported = true;
+            break;
+         }
+      }
+
+      if (!supported) {
+         throw new Error(`Unsupported storage class ${storage_classes[i]}`);
+      }
    }
 
-   if(!all_device_ids || all_device_ids.length == 0) {
-      const userData = window.localStorage.getItem("blockstack");
-      all_device_ids = userDta.allDeviceIds;
-      assert(all_device_ids);
-      assert(all_device_ids.length > 0);
+   // decode 
+   const session = jsontokens.decodeToken(sessionToken).payload;
+
+   let drivers = null;
+
+   // find satisfactory storage drivers 
+   if (Object.keys(session.storage.preferences).includes(session.app_domain)) {
+
+      // app-specific preference
+      drivers = session.storage.preferences[app_domain];
+   }
+   else {
+
+      // select defaults from classification
+      let driver_sets = [];
+      let all_drivers = new Set([]);
+      for (let i = 0; i < storage_classes.length; i++) {
+         let driver_set = new Set(session.storage.classes[storage_classes[i]]);
+         driver_sets.push(driver_set);
+
+         for(let d of driver_set) {
+             all_drivers.add(d);
+         }
+      }
+
+      let available_drivers = [];
+      for (let d of all_drivers) {
+
+         let available = true;
+         for (let i = 0; i < driver_sets.length; i++) {
+            if (!driver_sets[i].has(d)) {
+               available = false;
+               break;
+            }
+         }
+
+         if (available) {
+            available_drivers.push(d);
+         }
+
+         if (available_drivers.length > replicas) {
+            break;
+         }
+      }
+
+      drivers = available_drivers;
    }
 
-   return datastoreConnect(hostport, session, null, privkey, this_device_id).then(
+
+   const hostport = session.api_endpoint.split('://').reverse()[0];
+   const appPublicKeys = session.app_public_keys;
+   const deviceID = session.device_id;
+   const allDeviceIDs = [];
+
+   for (let i = 0; i < appPublicKeys.length; i++) {
+      allDeviceIDs.push(appPublicKeys[i].device_id);
+   }
+   
+   console.log(`Will use drivers ${drivers.join(',')}`);
+   console.log(`Datastore will span devices ${allDeviceIDs.join(',')}`);
+
+   const datastoreOpts = {
+      'appPrivateKey': appPrivateKey,
+      'sessionToken': sessionToken,
+   };
+
+   return datastoreConnect(datastoreOpts).then(
       (datastore_ctx) => {
          if (datastore_ctx.error && datastore_ctx.errno === ENOENT) {
             // does not exist
             console.log("Datastore does not exist; creating...");
 
-            const info = datastoreCreateRequest('datastore', privkey, drivers, this_device_id, all_device_ids );
+            const info = datastoreCreateRequest('datastore', appPrivateKey, drivers, deviceID, allDeviceIDs );
 
             // go create it
-            return datastoreCreate( hostport, session, info ).then(
+            return datastoreCreate( hostport, sessionToken, info ).then(
                (res) => {
                   if (res.error) {
                      console.log(res.error);
@@ -517,7 +686,7 @@ export function datastoreConnectOrCreate(hostport, drivers, privkey=null, sessio
                   }
 
                   // connect to it now
-                  return datastoreConnect( hostport, session, null, privkey, this_device_id );
+                  return datastoreConnect(datastoreOpts);
                },
                (error) => {
                   console.log(error);
@@ -554,12 +723,13 @@ export function datastoreConnectOrCreate(hostport, drivers, privkey=null, sessio
 export function lookup(ds, path, opts) {
 
    const datastore_id = ds.datastore_id;
-   const device_list = getDeviceList(ds.datastore.device_ids);
+   const device_list = getDeviceList(ds);
+   const device_pubkeys = getPublicKeyList(ds);
    const options = {
       'method': 'GET',
       'host': ds.host,
       'port': ds.port,
-      'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitizePath(path))}&device_ids=${device_list}`,
+      'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitizePath(path))}&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${ds.blockchain_id}`,
    };
 
    if (!opts) {
@@ -600,12 +770,13 @@ export function lookup(ds, path, opts) {
 export function listDir(ds, path, opts) {
 
    const datastore_id = ds.datastore_id;
-   const device_list = getDeviceList(ds.datastore.device_ids);
+   const device_list = getDeviceList(ds);
+   const device_pubkeys = getPublicKeyList(ds);
    const options = {
       'method': 'GET',
       'host': ds.host,
       'port': ds.port,
-      'path': `/v1/stores/${datastore_id}/directories?path=${escape(sanitizePath(path))}&idata=1&device_ids=${device_list}`,
+      'path': `/v1/stores/${datastore_id}/directories?path=${escape(sanitizePath(path))}&idata=1&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${ds.blockchain_id}`,
    };
 
    let schema = MUTABLE_DATUM_DIR_IDATA_SCHEMA;
@@ -645,12 +816,13 @@ export function listDir(ds, path, opts) {
 export function stat(ds, path, opts) {
 
    const datastore_id = ds.datastore_id;
-   const device_list = getDeviceList(ds.datastore.device_ids);
+   const device_list = getDeviceList(ds);
+   const device_pubkeys = getPublicKeyList(ds);
    const options = {
       'method': 'GET',
       'host': ds.host,
       'port': ds.port,
-      'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitizePath(path))}&device_ids=${device_list}`,
+      'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitizePath(path))}&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${ds.blockchain_id}`,
    };
 
    let schema = MUTABLE_DATUM_INODE_SCHEMA;
@@ -691,12 +863,13 @@ export function stat(ds, path, opts) {
 function getInode(ds, path, opts) {
 
    const datastore_id = ds.datastore_id;
-   const device_list = getDeviceList(ds.datastore.device_ids);
+   const device_list = getDeviceList(ds);
+   const device_pubkeys = getPublicKeyList(ds);
    const options = {
       'method': 'GET',
       'host': ds.host,
       'port': ds.port,
-      'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitizePath(path))}&idata=1&device_ids=${device_list}`,
+      'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitizePath(path))}&idata=1&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${ds.blockchain_id}`,
    };
 
    let schema = MUTABLE_DATUM_INODE_SCHEMA;
@@ -736,12 +909,13 @@ function getInode(ds, path, opts) {
 export function getFile(ds, path, opts) {
 
    const datastore_id = ds.datastore_id;
-   const device_list = getDeviceList(ds.datastore.device_ids);
+   const device_list = getDeviceList(ds);
+   const device_pubkeys = getPublicKeyList(ds);
    const options = {
       'method': 'GET',
       'host': ds.host,
       'port': ds.port,
-      'path': `/v1/stores/${datastore_id}/files?path=${escape(sanitizePath(path))}&idata=1&device_ids=${device_list}`,
+      'path': `/v1/stores/${datastore_id}/files?path=${escape(sanitizePath(path))}&idata=1&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${ds.blockchain_id}`,
    };
 
    let schema = SUCCESS_FAIL_SCHEMA;
@@ -786,32 +960,33 @@ function datastoreOperation(ds, operation, path, inodes, payloads, signatures, t
    let http_operation = null;
    const datastore_id = ds.datastore_id;
    const datastore_privkey = ds.privkey_hex;
-   const device_list = getDeviceList(ds.datastore.device_ids);
+   const device_list = getDeviceList(ds);
+   const device_pubkeys = getPublicKeyList(ds);
 
    assert(inodes.length === payloads.length);
    assert(payloads.length === signatures.length);
 
    if (operation === 'mkdir') {
-      request_path = `/v1/stores/${datastore_id}/directories?path=${escape(sanitizePath(path))}&device_ids=${device_list}`;
+      request_path = `/v1/stores/${datastore_id}/directories?path=${escape(sanitizePath(path))}&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${ds.blockchain_id}`;
       http_operation = 'POST';
 
       assert(inodes.length === 2);
    }
    else if (operation === 'putFile') {
-      request_path = `/v1/stores/${datastore_id}/files?path=${escape(sanitizePath(path))}&device_ids=${device_list}`;
+      request_path = `/v1/stores/${datastore_id}/files?path=${escape(sanitizePath(path))}&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${ds.blockchain_id}`;
       http_operation = 'PUT';
 
       assert(inodes.length === 1 || inodes.length === 2);
    }
    else if (operation === 'rmdir') {
-      request_path = `/v1/stores/${datastore_id}/directories?path=${escape(sanitizePath(path))}`;
+      request_path = `/v1/stores/${datastore_id}/directories?path=${escape(sanitizePath(path))}&device_pubkeys=${device_pubkeys}&device_ids=${device_list}&blockchain_id=${ds.blockchain_id}`;
       http_operation = 'DELETE';
 
       assert(inodes.length === 1);
       assert(tombstones.length >= 1);
    }
    else if (operation === 'deleteFile') {
-      request_path = `/v1/stores/${datastore_id}/files?path=${escape(sanitizePath(path))}`;
+      request_path = `/v1/stores/${datastore_id}/files?path=${escape(sanitizePath(path))}&device_pubkeys=${device_pubkeys}&device_ids=${device_list}&blockchain_id=${ds.blockchain_id}`;
       http_operation = 'DELETE';
 
       assert(inodes.length === 1);
@@ -1038,7 +1213,7 @@ export function deleteFile(ds, path, parent_dir) {
             return {'error': 'No such file or directory', 'errno': ENOENT};
          }
 
-         const inode_uuid = parent_dir['idata']['children'][child_name];
+         const inode_uuid = parent_dir['idata']['children'][child_name]['uuid'];
 
          // unlink 
          const new_parent_dir_inode = inodeDirUnlink(parent_dir, child_name);
@@ -1086,7 +1261,7 @@ export function rmdir(ds, path, parent_dir) {
             return {'error': 'No such file or directory', 'errno': ENOENT};
          }
 
-         const inode_uuid = parent_dir['idata']['children'][child_name];
+         const inode_uuid = parent_dir['idata']['children'][child_name]['uuid'];
 
          // unlink 
          const new_parent_dir_inode = inodeDirUnlink(parent_dir, child_name);
