@@ -26,7 +26,7 @@ export function createDatastore( privkey, session, device_id, all_device_ids, dr
 // get or create 
 export function getOrCreateDatastore( replication_strategy, session, privkey ) {
    console.log(`getOrCreateDatastore(${replication_strategy}, ${session}, ${privkey})`);
-   return datastore.datastoreConnectOrCreate(replication_strategy, session, privkey );
+   return datastore.datastoreMountOrCreate(replication_strategy, session, privkey );
 }
 
 // delete datastore 
@@ -51,10 +51,11 @@ export function datastoreGetFile(ds_str, path, extended, force) {
    var opts = {
       'extended': extended,
       'force': force,
+      'ds': ds,
    };
 
    console.log(`getfile(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
-   return datastore.getFile(ds, path, opts);
+   return datastore.getFile(path, opts);
 }
 
 
@@ -71,10 +72,11 @@ export function datastorePutFile(ds_str, path, data_str, extended, force) {
    var opts = {
       'extended': extended,
       'force': force,
+      'ds': ds,
    };
 
    console.log(`putfile(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
-   return datastore.putFile(ds, path, Buffer.from(data_str), opts);
+   return datastore.putFile(path, Buffer.from(data_str), opts);
 }
 
 
@@ -89,10 +91,11 @@ export function datastoreDeleteFile(ds_str, path, extended, force) {
    var opts = {
       'extended': extended,
       'force': force,
+      'ds': ds,
    };
 
    console.log(`deletefile(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
-   return datastore.deleteFile(ds, path, opts);
+   return datastore.deleteFile(path, opts);
 }
 
 
@@ -107,10 +110,11 @@ export function datastoreMkdir(ds_str, path, extended, force) {
    var opts = {
       'extended': extended,
       'force': force,
+      'ds': ds,
    };
 
    console.log(`mkdir(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
-   return datastore.mkdir(ds, path, opts);
+   return datastore.mkdir(path, opts);
 }
 
 
@@ -125,10 +129,11 @@ export function datastoreListdir(ds_str, path, extended, force) {
    var opts = {
       'extended': extended,
       'force': force,
+      'ds': ds,
    };
 
    console.log(`listDir(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
-   return datastore.listDir(ds, path, opts);
+   return datastore.listDir(path, opts);
 }
 
 
@@ -143,10 +148,11 @@ export function datastoreRmdir(ds_str, path, extended, force) {
    var opts = {
       'extended': extended,
       'force': force,
+      'ds': ds,
    };
 
    console.log(`rmdir(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
-   return datastore.rmdir(ds, path, opts);
+   return datastore.rmdir(path, opts);
 }
 
 
@@ -161,8 +167,9 @@ export function datastoreStat(ds_str, path, extended, force) {
    var opts = {
       'extended': extended,
       'force': force,
+      'ds': ds,
    };
 
    console.log(`stat(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
-   return datastore.stat(ds, path, opts);
+   return datastore.stat(path, opts);
 }

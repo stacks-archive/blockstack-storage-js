@@ -55,6 +55,7 @@ const LOCAL_STORAGE_ID = "blockstack";
 const SUPPORTED_STORAGE_CLASSES = ["read_public", "write_public", "read_private", "write_private", "read_local", "write_local"];
 const REPLICATION_STRATEGY_CLASSES = {
    'local': new Set(['read_local', 'write_local']),
+   'publish': new Set(['read_public', 'write_private']),
    'public': new Set(['read_public', 'write_public']),
    'private': new Set(['read_private', 'write_private']),
 };
@@ -370,12 +371,20 @@ export function datastoreCreate( blockstack_hostport, blockstack_session_token, 
 /*
  * Generate the data needed to delete a datastore.
  *
- * @param ds (Object) a datastore context
- * @param privkey (String) the hex-encoded datastore private key
+ * @param ds (Object) a datastore context (will be loaded from localstorage if not given)
  *
  * Returns an object to be given to datastoreDelete()
  */
-export function datastoreDeleteRequest(ds) {
+export function datastoreDeleteRequest(ds=null) {
+
+   if (!ds) {
+      const blockchain_id = getSessionBlockchainID();
+      assert(blockchain_id);
+
+      ds = getCachedMountContext(blockchain_id);
+      assert(ds);
+   }
+
    const datastore_id = ds.datastore_id;
    const device_ids = ds.datastore.device_ids;
    const root_uuid = ds.datastore.root_uuid;
@@ -398,14 +407,22 @@ export function datastoreDeleteRequest(ds) {
 /*
  * Delete a datastore
  *
- * @param ds (Object) a datastore context
+ * @param ds (Object) OPTINOAL: the datastore context (will be loaded from localStorage if not given)
  * @param ds_tombstones (Object) OPTINOAL: signed information from datastoreDeleteRequest()
  * @param root_tombstones (Object) OPTINAL: signed information from datastoreDeleteRequest()
  *
  * Asynchronous; returns a Promise
  */
-export function datastoreDelete(ds, ds_tombstones, root_tombstones) {
+export function datastoreDelete(ds=null, ds_tombstones=null, root_tombstones=null) {
    
+   if (!ds) {
+      const blockchain_id = getSessionBlockchainID();
+      assert(blockchain_id);
+
+      ds = getCachedMountContext(blockchain_id);
+      assert(ds);
+   }
+
    if (!ds_tombstones || !root_tombstones) {
       const delete_info = datastoreDeleteRequest(ds);
       ds_tombstones = delete_info['datastore_tombstones'];
@@ -458,7 +475,7 @@ export function datastoreDelete(ds, ds_tombstones, root_tombstones) {
  *      .host: blockstack host
  *      .datastore: datastore object
  */
-export function datastoreConnect(opts) {
+export function datastoreMount(opts) {
 
    const data_privkey_hex = opts.appPrivateKey;
    let sessionToken = opts.sessionToken;
@@ -552,6 +569,18 @@ export function datastoreConnect(opts) {
       }
       else {
          ctx['datastore'] = ds.datastore;
+
+         // save
+         setCachedMountContext(blockchain_id, ctx);
+
+         // this is required for testing purposes, since the core session token will not have been set 
+         let userData = getUserData();
+         if (!userData.coreSessionToken) {
+            console.log("In test framework; saving session token");
+            userData.coreSessionToken = sessionToken;
+            setUserData(userData);
+         }
+
          return ctx;
       }
    });
@@ -563,9 +592,100 @@ export function datastoreConnect(opts) {
  * Throws on error
  */
 function getUserData() {
-   const userData = window.localStorage.getItem(LOCAL_STORAGE_ID);
-   assert(userData);
+   let localStorage = null;
+    
+   if (typeof window === 'undefined' || window === null) {
+      const LocalStorage = require('node-localstorage').LocalStorage;
+      localStorage = new LocalStorage('./scratch');
+   }
+   else {
+      localStorage = window.localStorage;
+   }
+
+   let userData = localStorage.getItem(LOCAL_STORAGE_ID);
+   if (userData === null) {
+      userData = '{}';
+   }
+
+   userData = JSON.parse(userData);
    return userData;
+}
+
+
+/*
+ * Save local storage
+ */
+function setUserData(userData) {
+   let localStorage = null;
+    
+   if (typeof window === 'undefined' || window === null) {
+      const LocalStorage = require('node-localstorage').LocalStorage;
+      localStorage = new LocalStorage('./scratch');
+   }
+   else {
+      localStorage = window.localStorage;
+   }
+
+   localStorage.setItem(LOCAL_STORAGE_ID, JSON.stringify(userData));
+}
+
+/*
+ * Get a cached app-specific datastore mount context for a given blockchain ID and application
+ * Return null if not found
+ * Throws on error
+ */
+function getCachedMountContext(blockchain_id) {
+
+   let userData = getUserData();
+   if (!userData.datastore_contexts) {
+      console.log("No datastore contexts defined");
+      return null;
+   }
+
+   if (!userData.datastore_contexts[blockchain_id]) {
+      console.log(`No datastore contexts for ${blockchain_id}`);
+      return null;
+   }
+
+   let ctx = userData.datastore_contexts[blockchain_id];
+   if (!ctx) {
+      console.log(`Null datastore context for ${blockchain_id}`);
+      return null;
+   }
+
+   return ctx;
+}
+
+
+/*
+ * Cache a mount context for a blockchain ID
+ */
+function setCachedMountContext(blockchain_id, datastore_context) {
+
+   let userData = getUserData();
+   if (!userData.datastore_contexts) {
+      userData.datastore_contexts = {};
+   }
+
+   userData.datastore_contexts[blockchain_id] = datastore_context;
+   setUserData(userData);
+}
+
+
+/*
+ * Get the current session's blockchain ID
+ * Throw if not defined or not present.
+ */
+function getSessionBlockchainID() {
+
+   let userData = getUserData();
+   assert(userData);
+   assert(userData.coreSessionToken);
+
+   const session = jsontokens.decodeToken(userData.coreSessionToken).payload;
+
+   assert(session.blockchain_id);
+   return session.blockchain_id;
 }
 
 
@@ -682,7 +802,7 @@ function selectDrivers(replication_strategy, classes) {
  * Returns a Promise that yields a datastore connection, or an error object with .error defined.
  *
  */
-export function datastoreConnectOrCreate(replication_strategy={'public': 1, 'local': 1}, sessionToken=null, appPrivateKey=null) {
+export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local': 1}, sessionToken=null, appPrivateKey=null) {
    
    if(!sessionToken) {
       const userData = getUserData();
@@ -698,6 +818,10 @@ export function datastoreConnectOrCreate(replication_strategy={'public': 1, 'loc
       assert(appPrivateKey);
    }
 
+   // decode 
+   const session = jsontokens.decodeToken(sessionToken).payload;
+   assert(session.blockchain_id);
+
    // sanity check 
    for (let strategy of Object.keys(replication_strategy)) {
       let supported = false;
@@ -712,9 +836,6 @@ export function datastoreConnectOrCreate(replication_strategy={'public': 1, 'loc
          throw new Error(`Unsupported replication strategy ${strategy}`);
       }
    }
-
-   // decode 
-   const session = jsontokens.decodeToken(sessionToken).payload;
 
    let drivers = null;
 
@@ -747,7 +868,7 @@ export function datastoreConnectOrCreate(replication_strategy={'public': 1, 'loc
       'sessionToken': sessionToken,
    };
 
-   return datastoreConnect(datastoreOpts).then(
+   return datastoreMount(datastoreOpts).then(
       (datastore_ctx) => {
          if (datastore_ctx.error && datastore_ctx.errno === ENOENT) {
             // does not exist
@@ -764,7 +885,7 @@ export function datastoreConnectOrCreate(replication_strategy={'public': 1, 'loc
                   }
 
                   // connect to it now
-                  return datastoreConnect(datastoreOpts);
+                  return datastoreMount(datastoreOpts);
                },
                (error) => {
                   console.log(error);
@@ -795,10 +916,25 @@ export function datastoreConnectOrCreate(replication_strategy={'public': 1, 'loc
  *      .extended (Bool) whether or not to include the entire path's inode information
  *      .force (Bool) if True, then ignore stale inode errors.
  *      .idata (Bool) if True, then get the inode payload as well
+ *      .blockchain_id (String) this is the blockchain ID of the datastore owner, if different from the session token
+ *      .ds (datastore context) if given, then use this datastore mount context instead of one from localstorage
  *
  * Asynchronos; call .end() on the returned object.
  */
-export function lookup(ds, path, opts) {
+export function lookup(path, opts={}) {
+
+   let ds = opts.ds;
+   let blockchain_id = opts.blockchain_id;
+
+   if (!opts.blockchain_id) {
+      blockchain_id = getSessionBlockchainID();
+   }
+
+   if (!opts.ds) {
+      ds = getCachedMountContext(blockchain_id);
+   }
+
+   assert(ds);
 
    const datastore_id = ds.datastore_id;
    const device_list = getDeviceList(ds);
@@ -842,10 +978,25 @@ export function lookup(ds, path, opts) {
  * @param opts (Object) optional arguments:
  *      .extended (Bool) whether or not to include the entire path's inode inforamtion
  *      .force (Bool) if True, then ignore stale inode errors.
+ *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
+ *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
  *
  * Asynchronous; returns a Promise
  */
-export function listDir(ds, path, opts) {
+export function listDir(path, opts={}) {
+
+   let ds = opts.ds;
+   let blockchain_id = opts.blockchain_id;
+
+   if (!opts.blockchain_id) {
+      blockchain_id = getSessionBlockchainID();
+   }
+
+   if (!opts.ds) {
+      ds = getCachedMountContext(blockchain_id);
+   }
+
+   assert(ds);
 
    const datastore_id = ds.datastore_id;
    const device_list = getDeviceList(ds);
@@ -888,10 +1039,25 @@ export function listDir(ds, path, opts) {
  * @param opts (Object) optional arguments:
  *      .extended (Bool) whether or not to include the entire path's inode inforamtion
  *      .force (Bool) if True, then ignore stale inode errors.
+ *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
+ *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
  *
  * Asynchronous; returns a Promise
  */
-export function stat(ds, path, opts) {
+export function stat(path, opts={}) {
+
+   let ds = opts.ds;
+   let blockchain_id = opts.blockchain_id;
+
+   if (!opts.blockchain_id) {
+      blockchain_id = getSessionBlockchainID();
+   }
+
+   if (!opts.ds) {
+      ds = getCachedMountContext(blockchain_id);
+   }
+
+   assert(ds);
 
    const datastore_id = ds.datastore_id;
    const device_list = getDeviceList(ds);
@@ -935,10 +1101,25 @@ export function stat(ds, path, opts) {
  * @param opts (Object) optional arguments:
  *      .extended (Bool) whether or not to include the entire path's inode inforamtion
  *      .force (Bool) if True, then ignore stale inode errors.
+ *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
+ *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
  *
  * Asynchronous; returns a Promise
  */
-function getInode(ds, path, opts) {
+function getInode(path, opts=null) {
+
+   let ds = opts.ds;
+   let blockchain_id = opts.blockchain_id;
+
+   if (!opts.blockchain_id) {
+      blockchain_id = getSessionBlockchainID();
+   }
+
+   if (!opts.ds) {
+      ds = getCachedMountContext(blockchain_id);
+   }
+
+   assert(ds);
 
    const datastore_id = ds.datastore_id;
    const device_list = getDeviceList(ds);
@@ -981,10 +1162,25 @@ function getInode(ds, path, opts) {
  * @param opts (Object) optional arguments:
  *      .extended (Bool) whether or not to include the entire path's inode inforamtion
  *      .force (Bool) if True, then ignore stale inode errors.
+ *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
+ *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
  *
  * Asynchronous; returns a Promise
  */
-export function getFile(ds, path, opts) {
+export function getFile(path, opts={}) {
+
+   let ds = opts.ds;
+   let blockchain_id = opts.blockchain_id;
+
+   if (!opts.blockchain_id) {
+      blockchain_id = getSessionBlockchainID();
+   }
+
+   if (!opts.ds) {
+      ds = getCachedMountContext(blockchain_id);
+   }
+   
+   assert(ds);
 
    const datastore_id = ds.datastore_id;
    const device_list = getDeviceList(ds);
@@ -1113,12 +1309,16 @@ function datastoreOperation(ds, operation, path, inodes, payloads, signatures, t
  * @param ds (Object) a datastore context
  * @param path (String) the path to the inode in question
  * @param opts (Object) lookup options
+ *      .extended (Bool) whether or not to include the entire path's inode inforamtion
+ *      .force (Bool) if True, then ignore stale inode errors.
+ *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
+ *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
  *
  * Asynchronous; returns a Promise
  */
-export function getParent(ds, path, opts) {
+function getParent(path, opts=null) {
    const dirpath = dirname(path);
-   return getInode(ds, dirpath, opts).then(
+   return getInode(dirpath, opts).then(
       (inode) => {
          if (!inode) {
             return {'error': 'Failed to get parent', 'errno': EREMOTEIO};
@@ -1143,10 +1343,28 @@ export function getParent(ds, path, opts) {
  * @param ds (Object) a datastore context
  * @param path (String) the path to the file to create (must not exist)
  * @param file_buffer (Buffer or String) the file contents
+ * @param opts (Object) lookup options
+ *      .extended (Bool) whether or not to include the entire path's inode inforamtion
+ *      .force (Bool) if True, then ignore stale inode errors.
+ *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
+ *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
  *
  * Asynchronous; returns a Promise
  */
-export function putFile(ds, path, file_buffer) {
+export function putFile(path, file_buffer, opts={}) {
+
+   let ds = opts.ds;
+   let blockchain_id = opts.blockchain_id;
+
+   if (!opts.blockchain_id) {
+      blockchain_id = getSessionBlockchainID();
+   }
+
+   if (!opts.ds) {
+      ds = getCachedMountContext(blockchain_id);
+   }
+
+   assert(ds);
 
    const datastore_id = ds.datastore_id;
    const device_id = ds.device_id;
@@ -1158,7 +1376,7 @@ export function putFile(ds, path, file_buffer) {
    assert(typeof(file_buffer) === 'string' || (file_buffer instanceof Buffer));
 
    // get parent dir 
-   return getParent(ds, path).then(
+   return getParent(path, opts).then(
       (parent_dir) => {
          
          if (parent_dir.error) {
@@ -1220,10 +1438,26 @@ export function putFile(ds, path, file_buffer) {
  *
  * @param ds (Object) datastore context
  * @param path (String) path to the directory
+ * @param opts (object) optional arguments
+ *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
+ *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
  *
  * Asynchronous; returns a Promise
  */
-export function mkdir(ds, path, parent_dir) {
+export function mkdir(path, opts={}) {
+
+   let ds = opts.ds;
+   let blockchain_id = opts.blockchain_id;
+
+   if (!opts.blockchain_id) {
+      blockchain_id = getSessionBlockchainID();
+   }
+
+   if (!opts.ds) {
+      ds = getCachedMountContext(blockchain_id);
+   }
+
+   assert(ds);
 
    const datastore_id = ds.datastore_id;
    const device_id = ds.device_id;
@@ -1232,7 +1466,7 @@ export function mkdir(ds, path, parent_dir) {
    path = sanitizePath(path);
    const child_name = basename(path);
 
-   return getParent(ds, path).then(
+   return getParent(path, opts).then(
       (parent_dir) => {
 
          if (parent_dir.error) {
@@ -1266,11 +1500,26 @@ export function mkdir(ds, path, parent_dir) {
  *
  * @param ds (Object) datastore context
  * @param path (String) path to the directory
- * @param parent_dir (Object) (optional) parent directory inode
+ * @param opts (Object) options for this call
+ *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
+ *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
  *
  * Asynchronous; returns a Promise
  */
-export function deleteFile(ds, path, parent_dir) {
+export function deleteFile(path, opts={}) {
+
+   let ds = opts.ds;
+   let blockchain_id = opts.blockchain_id;
+
+   if (!opts.blockchain_id) {
+      blockchain_id = getSessionBlockchainID();
+   }
+
+   if (!opts.ds) {
+      ds = getCachedMountContext(blockchain_id);
+   }
+
+   assert(ds);
 
    const datastore_id = ds.datastore_id;
    const device_id = ds.device_id;
@@ -1280,7 +1529,7 @@ export function deleteFile(ds, path, parent_dir) {
    path = sanitizePath(path);
    const child_name = basename(path);
 
-   return getParent(ds, path).then(
+   return getParent(path, opts).then(
       (parent_dir) => {
          if (parent_dir.error) {
             return parent_dir;
@@ -1314,11 +1563,26 @@ export function deleteFile(ds, path, parent_dir) {
  *
  * @param ds (Object) datastore context
  * @param path (String) path to the directory
- * @param parent_dir (Object) (optional) parent directory inode
+ * @param opts (Object) options for this call
+ *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
+ *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
  *
  * Asynchronous; returns a Promise
  */
-export function rmdir(ds, path, parent_dir) {
+export function rmdir(path, opts={}) {
+
+   let ds = opts.ds;
+   let blockchain_id = opts.blockchain_id;
+
+   if (!opts.blockchain_id) {
+      blockchain_id = getSessionBlockchainID();
+   }
+
+   if (!opts.ds) {
+      ds = getCachedMountContext(blockchain_id);
+   }
+
+   assert(ds);
 
    const datastore_id = ds.datastore_id;
    const device_id = ds.device_id;
@@ -1328,7 +1592,7 @@ export function rmdir(ds, path, parent_dir) {
    path = sanitizePath(path);
    const child_name = basename(path);
 
-   return getParent(ds, path).then(
+   return getParent(path, opts).then(
       (parent_dir) => {
          if (parent_dir.error) {
             return parent_dir;
