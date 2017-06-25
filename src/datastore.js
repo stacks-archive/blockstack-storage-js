@@ -803,7 +803,7 @@ function selectDrivers(replication_strategy, classes) {
  *
  */
 export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local': 1}, sessionToken=null, appPrivateKey=null) {
-   
+
    if(!sessionToken) {
       const userData = getUserData();
 
@@ -811,16 +811,24 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
       assert(sessionToken);
    }
 
+   // decode 
+   const session = jsontokens.decodeToken(sessionToken).payload;
+   assert(session.blockchain_id);
+ 
+   let ds = getCachedMountContext(session.blockchain_id);
+   if (ds) {
+      console.log(`Using cached datastore mount context for ${session.blockchain_id}`);
+      return new Promise((resolve, reject) => { resolve(ds); });
+   }
+    
+   // no cached datastore context.
+   // go ahead and create one (need appPrivateKey)
    if(!appPrivateKey) {
       const userData = getUserData();
 
       appPrivateKey = userData.appPrivateKey;
       assert(appPrivateKey);
    }
-
-   // decode 
-   const session = jsontokens.decodeToken(sessionToken).payload;
-   assert(session.blockchain_id);
 
    // sanity check 
    for (let strategy of Object.keys(replication_strategy)) {
@@ -923,50 +931,48 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
  */
 export function lookup(path, opts={}) {
 
-   let ds = opts.ds;
    let blockchain_id = opts.blockchain_id;
 
    if (!opts.blockchain_id) {
       blockchain_id = getSessionBlockchainID();
    }
 
-   if (!opts.ds) {
-      ds = getCachedMountContext(blockchain_id);
-   }
+   return datastoreMountOrCreate()
+   .then((ds) => {
+      assert(ds);
 
-   assert(ds);
+      const datastore_id = ds.datastore_id;
+      const device_list = getDeviceList(ds);
+      const device_pubkeys = getPublicKeyList(ds);
+      const options = {
+         'method': 'GET',
+         'host': ds.host,
+         'port': ds.port,
+         'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitizePath(path))}&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${ds.blockchain_id}`,
+      };
 
-   const datastore_id = ds.datastore_id;
-   const device_list = getDeviceList(ds);
-   const device_pubkeys = getPublicKeyList(ds);
-   const options = {
-      'method': 'GET',
-      'host': ds.host,
-      'port': ds.port,
-      'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitizePath(path))}&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${ds.blockchain_id}`,
-   };
+      if (!opts) {
+         opts = {};
+      }
 
-   if (!opts) {
-      opts = {};
-   }
+      let schema = DATASTORE_LOOKUP_RESPONSE_SCHEMA;
 
-   let schema = DATASTORE_LOOKUP_RESPONSE_SCHEMA;
+      if (opts.extended) {
+         options['path'] += '&extended=1';
+         schema = DATASTORE_LOOKUP_EXTENDED_RESPONSE_SCHEMA;
+      }
 
-   if (opts.extended) {
-      options['path'] += '&extended=1';
-      schema = DATASTORE_LOOKUP_EXTENDED_RESPONSE_SCHEMA;
-   }
+      if (opts.force) {
+         options['path'] += '&force=1';
+      }
 
-   if (opts.force) {
-      options['path'] += '&force=1';
-   }
-
-   if (opts.idata) {
-      options['idata'] += '&idata=1';
-   }
+      if (opts.idata) {
+         options['idata'] += '&idata=1';
+      }
 
 
-   return httpRequest(options, schema);
+      return httpRequest(options, schema);
+   });
 }
     
 
@@ -985,49 +991,48 @@ export function lookup(path, opts={}) {
  */
 export function listDir(path, opts={}) {
 
-   let ds = opts.ds;
    let blockchain_id = opts.blockchain_id;
 
    if (!opts.blockchain_id) {
       blockchain_id = getSessionBlockchainID();
    }
 
-   if (!opts.ds) {
-      ds = getCachedMountContext(blockchain_id);
-   }
+   return datastoreMountOrCreate()
+   .then((ds) => {
 
-   assert(ds);
+      assert(ds);
 
-   const datastore_id = ds.datastore_id;
-   const device_list = getDeviceList(ds);
-   const device_pubkeys = getPublicKeyList(ds);
-   const options = {
-      'method': 'GET',
-      'host': ds.host,
-      'port': ds.port,
-      'path': `/v1/stores/${datastore_id}/directories?path=${escape(sanitizePath(path))}&idata=1&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${ds.blockchain_id}`,
-   };
+      const datastore_id = ds.datastore_id;
+      const device_list = getDeviceList(ds);
+      const device_pubkeys = getPublicKeyList(ds);
+      const options = {
+         'method': 'GET',
+         'host': ds.host,
+         'port': ds.port,
+         'path': `/v1/stores/${datastore_id}/directories?path=${escape(sanitizePath(path))}&idata=1&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${ds.blockchain_id}`,
+      };
 
-   let schema = MUTABLE_DATUM_DIR_IDATA_SCHEMA;
+      let schema = MUTABLE_DATUM_DIR_IDATA_SCHEMA;
 
-   if (!opts) {
-      opts = {};
-   }
+      if (!opts) {
+         opts = {};
+      }
 
-   if (opts.extended) {
-      options['path'] += '&extended=1';
-      schema = MUTABLE_DATUM_EXTENDED_RESPONSE_SCHEMA;
-   }
+      if (opts.extended) {
+         options['path'] += '&extended=1';
+         schema = MUTABLE_DATUM_EXTENDED_RESPONSE_SCHEMA;
+      }
 
-   if (opts.force) {
-      optsion['path'] += '&force=1';
-   }
+      if (opts.force) {
+         optsion['path'] += '&force=1';
+      }
 
-   if (ds.session_token) {
-      options['headers'] = {'Authorization': `bearer ${ds.session_token}`};
-   }
+      if (ds.session_token) {
+         options['headers'] = {'Authorization': `bearer ${ds.session_token}`};
+      }
 
-   return httpRequest(options, schema);
+      return httpRequest(options, schema);
+   });
 }
 
 
@@ -1053,42 +1058,42 @@ export function stat(path, opts={}) {
       blockchain_id = getSessionBlockchainID();
    }
 
-   if (!opts.ds) {
-      ds = getCachedMountContext(blockchain_id);
-   }
+   return datastoreMountOrCreate()
+   .then((ds) => {
 
-   assert(ds);
+      assert(ds);
 
-   const datastore_id = ds.datastore_id;
-   const device_list = getDeviceList(ds);
-   const device_pubkeys = getPublicKeyList(ds);
-   const options = {
-      'method': 'GET',
-      'host': ds.host,
-      'port': ds.port,
-      'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitizePath(path))}&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${ds.blockchain_id}`,
-   };
+      const datastore_id = ds.datastore_id;
+      const device_list = getDeviceList(ds);
+      const device_pubkeys = getPublicKeyList(ds);
+      const options = {
+         'method': 'GET',
+         'host': ds.host,
+         'port': ds.port,
+         'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitizePath(path))}&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${ds.blockchain_id}`,
+      };
 
-   let schema = MUTABLE_DATUM_INODE_SCHEMA;
+      let schema = MUTABLE_DATUM_INODE_SCHEMA;
 
-   if (!opts) {
-      opts = {};
-   }
+      if (!opts) {
+         opts = {};
+      }
 
-   if (opts.extended) {
-      options['path'] += '&extended=1';
-      schema = MUTABLE_DATUM_EXTENDED_RESPONSE_SCHEMA;
-   }
-   
-   if (opts.force) {
-      optsion['path'] += '&force=1';
-   }
+      if (opts.extended) {
+         options['path'] += '&extended=1';
+         schema = MUTABLE_DATUM_EXTENDED_RESPONSE_SCHEMA;
+      }
+      
+      if (opts.force) {
+         optsion['path'] += '&force=1';
+      }
 
-   if (ds.session_token) {
-      options['headers'] = {'Authorization': `bearer ${ds.session_token}`};
-   } 
+      if (ds.session_token) {
+         options['headers'] = {'Authorization': `bearer ${ds.session_token}`};
+      } 
 
-   return httpRequest(options, schema);
+      return httpRequest(options, schema);
+   });
 }
 
 
@@ -1108,49 +1113,48 @@ export function stat(path, opts={}) {
  */
 function getInode(path, opts=null) {
 
-   let ds = opts.ds;
    let blockchain_id = opts.blockchain_id;
 
    if (!opts.blockchain_id) {
       blockchain_id = getSessionBlockchainID();
    }
 
-   if (!opts.ds) {
-      ds = getCachedMountContext(blockchain_id);
-   }
+   return datastoreMountOrCreate()
+   .then((ds) => {
 
-   assert(ds);
+      assert(ds);
 
-   const datastore_id = ds.datastore_id;
-   const device_list = getDeviceList(ds);
-   const device_pubkeys = getPublicKeyList(ds);
-   const options = {
-      'method': 'GET',
-      'host': ds.host,
-      'port': ds.port,
-      'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitizePath(path))}&idata=1&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${ds.blockchain_id}`,
-   };
+      const datastore_id = ds.datastore_id;
+      const device_list = getDeviceList(ds);
+      const device_pubkeys = getPublicKeyList(ds);
+      const options = {
+         'method': 'GET',
+         'host': ds.host,
+         'port': ds.port,
+         'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitizePath(path))}&idata=1&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${ds.blockchain_id}`,
+      };
 
-   let schema = MUTABLE_DATUM_INODE_SCHEMA;
+      let schema = MUTABLE_DATUM_INODE_SCHEMA;
 
-   if (!opts) {
-      opts = {};
-   }
+      if (!opts) {
+         opts = {};
+      }
 
-   if (opts.extended) {
-      options['path'] += '&extended=1';
-      schema = MUTABLE_DATUM_EXTENDED_RESPONSE_SCHEMA;
-   }
-   
-   if (opts.force) {
-      options['path'] += '&force=1';
-   }
+      if (opts.extended) {
+         options['path'] += '&extended=1';
+         schema = MUTABLE_DATUM_EXTENDED_RESPONSE_SCHEMA;
+      }
+      
+      if (opts.force) {
+         options['path'] += '&force=1';
+      }
 
-   if (ds.session_token) {
-      options['headers'] = {'Authorization': `bearer ${ds.session_token}`};
-   } 
+      if (ds.session_token) {
+         options['headers'] = {'Authorization': `bearer ${ds.session_token}`};
+      } 
 
-   return httpRequest(options, schema);
+      return httpRequest(options, schema);
+   });
 }
 
 
@@ -1169,49 +1173,47 @@ function getInode(path, opts=null) {
  */
 export function getFile(path, opts={}) {
 
-   let ds = opts.ds;
    let blockchain_id = opts.blockchain_id;
 
    if (!opts.blockchain_id) {
       blockchain_id = getSessionBlockchainID();
    }
-
-   if (!opts.ds) {
-      ds = getCachedMountContext(blockchain_id);
-   }
    
-   assert(ds);
+   return datastoreMountOrCreate()
+   .then((ds) => {
+      assert(ds);
 
-   const datastore_id = ds.datastore_id;
-   const device_list = getDeviceList(ds);
-   const device_pubkeys = getPublicKeyList(ds);
-   const options = {
-      'method': 'GET',
-      'host': ds.host,
-      'port': ds.port,
-      'path': `/v1/stores/${datastore_id}/files?path=${escape(sanitizePath(path))}&idata=1&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${ds.blockchain_id}`,
-   };
+      const datastore_id = ds.datastore_id;
+      const device_list = getDeviceList(ds);
+      const device_pubkeys = getPublicKeyList(ds);
+      const options = {
+         'method': 'GET',
+         'host': ds.host,
+         'port': ds.port,
+         'path': `/v1/stores/${datastore_id}/files?path=${escape(sanitizePath(path))}&idata=1&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${ds.blockchain_id}`,
+      };
 
-   let schema = SUCCESS_FAIL_SCHEMA;
+      let schema = SUCCESS_FAIL_SCHEMA;
 
-   if (!opts) {
-      opts = {};
-   }
+      if (!opts) {
+         opts = {};
+      }
 
-   if (opts.extended) {
-      options['path'] += '&extended=1';
-      schema = MUTABLE_DATUM_EXTENDED_RESPONSE_SCHEMA;
-   }
+      if (opts.extended) {
+         options['path'] += '&extended=1';
+         schema = MUTABLE_DATUM_EXTENDED_RESPONSE_SCHEMA;
+      }
 
-   if (opts.force) {
-      options['path'] += '&force=1';
-   }
+      if (opts.force) {
+         options['path'] += '&force=1';
+      }
 
-   if (ds.session_token) {
-      options['headers'] = {'Authorization': `bearer ${ds.session_token}`};
-   }
+      if (ds.session_token) {
+         options['headers'] = {'Authorization': `bearer ${ds.session_token}`};
+      }
 
-   return httpRequest(options, schema);
+      return httpRequest(options, schema);
+   });
 }
 
 
@@ -1316,24 +1318,23 @@ function datastoreOperation(ds, operation, path, inodes, payloads, signatures, t
  *
  * Asynchronous; returns a Promise
  */
-function getParent(path, opts=null) {
+function getParent(path, opts={}) {
    const dirpath = dirname(path);
-   return getInode(dirpath, opts).then(
-      (inode) => {
-         if (!inode) {
-            return {'error': 'Failed to get parent', 'errno': EREMOTEIO};
-         }
-         if (inode.type !== MUTABLE_DATUM_DIR_TYPE) {
-            return {'error': 'Not a directory', 'errno': ENOTDIR}
-         }
-         else {
-            return inode;
-         }
-      },
-      (error_resp) => {
-         return {'error': 'Failed to get inode', 'errno': EREMOTEIO};
+   return getInode(dirpath, opts)
+   .then((inode) => {
+      if (!inode) {
+         return {'error': 'Failed to get parent', 'errno': EREMOTEIO};
       }
-   );
+      if (inode.type !== MUTABLE_DATUM_DIR_TYPE) {
+         return {'error': 'Not a directory', 'errno': ENOTDIR}
+      }
+      else {
+         return inode;
+      }
+   },
+   (error_resp) => {
+      return {'error': 'Failed to get inode', 'errno': EREMOTEIO};
+   });
 }
 
 
@@ -1353,32 +1354,29 @@ function getParent(path, opts=null) {
  */
 export function putFile(path, file_buffer, opts={}) {
 
-   let ds = opts.ds;
    let blockchain_id = opts.blockchain_id;
 
    if (!opts.blockchain_id) {
       blockchain_id = getSessionBlockchainID();
    }
 
-   if (!opts.ds) {
-      ds = getCachedMountContext(blockchain_id);
-   }
+   return datastoreMountOrCreate()
+   .then((ds) => {
 
-   assert(ds);
+      assert(ds);
 
-   const datastore_id = ds.datastore_id;
-   const device_id = ds.device_id;
-   const privkey_hex = ds.privkey_hex;
+      const datastore_id = ds.datastore_id;
+      const device_id = ds.device_id;
+      const privkey_hex = ds.privkey_hex;
 
-   path = sanitizePath(path);
-   const child_name = basename(path);
+      path = sanitizePath(path);
+      const child_name = basename(path);
 
-   assert(typeof(file_buffer) === 'string' || (file_buffer instanceof Buffer));
+      assert(typeof(file_buffer) === 'string' || (file_buffer instanceof Buffer));
 
-   // get parent dir 
-   return getParent(path, opts).then(
-      (parent_dir) => {
-         
+      // get parent dir 
+      return getParent(path, opts)
+      .then((parent_dir) => {
          if (parent_dir.error) {
             return parent_dir;
          }
@@ -1428,8 +1426,8 @@ export function putFile(path, file_buffer, opts={}) {
          // post them
          const new_parent_info_b64 = new Buffer(new_parent_info['idata']).toString('base64');
          return datastoreOperation(ds, 'putFile', path, [inode_info['header'], new_parent_info['header']], [file_payload, new_parent_info_b64], [inode_sig, new_parent_sig], []);
-      },
-   );
+      });
+   });
 }
 
 
@@ -1446,29 +1444,26 @@ export function putFile(path, file_buffer, opts={}) {
  */
 export function mkdir(path, opts={}) {
 
-   let ds = opts.ds;
    let blockchain_id = opts.blockchain_id;
 
    if (!opts.blockchain_id) {
       blockchain_id = getSessionBlockchainID();
    }
 
-   if (!opts.ds) {
-      ds = getCachedMountContext(blockchain_id);
-   }
+   return datastoreMountOrCreate()
+   .then((ds) => {
 
-   assert(ds);
+      assert(ds);
 
-   const datastore_id = ds.datastore_id;
-   const device_id = ds.device_id;
-   const privkey_hex = ds.privkey_hex;
+      const datastore_id = ds.datastore_id;
+      const device_id = ds.device_id;
+      const privkey_hex = ds.privkey_hex;
 
-   path = sanitizePath(path);
-   const child_name = basename(path);
+      path = sanitizePath(path);
+      const child_name = basename(path);
 
-   return getParent(path, opts).then(
-      (parent_dir) => {
-
+      return getParent(path, opts)
+      .then((parent_dir) => {
          if (parent_dir.error) {
             return parent_dir;
          }
@@ -1490,8 +1485,8 @@ export function mkdir(path, opts={}) {
 
          // post them 
          return datastoreOperation(ds, 'mkdir', path, [inode_info['header'], new_parent_info['header']], [inode_info['idata'], new_parent_info['idata']], [inode_sig, new_parent_sig], []);
-      },
-   );
+      });
+   });
 }
 
 
@@ -1508,29 +1503,27 @@ export function mkdir(path, opts={}) {
  */
 export function deleteFile(path, opts={}) {
 
-   let ds = opts.ds;
    let blockchain_id = opts.blockchain_id;
 
    if (!opts.blockchain_id) {
       blockchain_id = getSessionBlockchainID();
    }
 
-   if (!opts.ds) {
-      ds = getCachedMountContext(blockchain_id);
-   }
+   return datastoreMountOrCreate()
+   .then((ds) => {
 
-   assert(ds);
+      assert(ds);
 
-   const datastore_id = ds.datastore_id;
-   const device_id = ds.device_id;
-   const privkey_hex = ds.privkey_hex;
-   const all_device_ids = ds.datastore.device_ids;
+      const datastore_id = ds.datastore_id;
+      const device_id = ds.device_id;
+      const privkey_hex = ds.privkey_hex;
+      const all_device_ids = ds.datastore.device_ids;
 
-   path = sanitizePath(path);
-   const child_name = basename(path);
+      path = sanitizePath(path);
+      const child_name = basename(path);
 
-   return getParent(path, opts).then(
-      (parent_dir) => {
+      return getParent(path, opts)
+      .then((parent_dir) => {
          if (parent_dir.error) {
             return parent_dir;
          }
@@ -1553,8 +1546,8 @@ export function deleteFile(path, opts={}) {
    
          // post them 
          return datastoreOperation(ds, 'deleteFile', path, [new_parent_info['header']], [new_parent_info['idata']], [new_parent_sig], signed_tombstones);
-      }
-   );
+      });
+   });
 }
 
 
@@ -1571,29 +1564,27 @@ export function deleteFile(path, opts={}) {
  */
 export function rmdir(path, opts={}) {
 
-   let ds = opts.ds;
    let blockchain_id = opts.blockchain_id;
 
    if (!opts.blockchain_id) {
       blockchain_id = getSessionBlockchainID();
    }
 
-   if (!opts.ds) {
-      ds = getCachedMountContext(blockchain_id);
-   }
+   return datastoreMountOrCreate()
+   .then((ds) => {
 
-   assert(ds);
+      assert(ds);
 
-   const datastore_id = ds.datastore_id;
-   const device_id = ds.device_id;
-   const privkey_hex = ds.privkey_hex;
-   const all_device_ids = ds.datastore.device_ids;
+      const datastore_id = ds.datastore_id;
+      const device_id = ds.device_id;
+      const privkey_hex = ds.privkey_hex;
+      const all_device_ids = ds.datastore.device_ids;
 
-   path = sanitizePath(path);
-   const child_name = basename(path);
+      path = sanitizePath(path);
+      const child_name = basename(path);
 
-   return getParent(path, opts).then(
-      (parent_dir) => {
+      return getParent(path, opts)
+      .then((parent_dir) => {
          if (parent_dir.error) {
             return parent_dir;
          }
@@ -1616,8 +1607,8 @@ export function rmdir(path, opts={}) {
 
          // post them 
          return datastoreOperation(ds, 'rmdir', path, [new_parent_info['header']], [new_parent_info['idata']], [new_parent_sig], signed_tombstones);
-      }
-   );
+      });
+   });
 }
 
 
