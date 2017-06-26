@@ -1,4 +1,13 @@
 *.swp
 *.swo
+
+# Dependency directory
+# https://www.npmjs.org/doc/misc/npm-faq.html#should-i-check-my-node_modules-folder-into-git
 node_modules
+
+# Other
+.DS_Store
+
+# Folder to ignore for development with es6
 lib
+bundle.js
