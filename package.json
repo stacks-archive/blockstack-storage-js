@@ -10,7 +10,8 @@
     "prepublish": "npm run compile",
     "release": "npm version patch && npm publish",
     "dev-build": "npm run compile; npm run compile-tests; npm run browserify;",
-    "integration-test-storage": "npm run compile; npm run compile-tests; npm run browserify; node ./tests/storageTests/lib/index.js"
+    "integration-test-storage": "npm run compile; npm run compile-tests; npm run browserify; node ./tests/storageTests/lib/index.js",
+    "test": "echo 'Use the integration test framework; see circle.yml'; echo 'success!'"
   },
   "repository": {
     "type": "git",
