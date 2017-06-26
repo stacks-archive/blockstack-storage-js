@@ -43,7 +43,7 @@ sudo rm -rf /usr/lib/node_modules/blockstack
 sudo cp -a /tmp/blockstack.js /usr/lib/node_modules/blockstack
 
 # get blockstack-storage.js 
-git clone https://github.com/blockstack/blockstack-storage.js /tmp/blockstack-storage.js
+git clone https://github.com/blockstack/blockstack-storage-js /tmp/blockstack-storage.js
 cd /tmp/blockstack-storage.js && git checkout "$BLOCKSTACK_STORAGE_JS_BRANCH" && npm install
 sudo rm -rf /usr/lib/node_modules/blockstack-storage
 sudo cp -a /tmp/blockstack-storage.js /usr/lib/node_modules/blockstack-storage
