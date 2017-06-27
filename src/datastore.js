@@ -105,8 +105,10 @@ function validateJSONResponse(resp, result_schema) {
  * @param options (Object) set of HTTP request options
  * @param result_schema (Object) JSON schema of the expected result 
  *
- * Pass 'bytes' for result_schema if you expect application/octet-stream
- * instead of application/json.
+ * Returns a structured JSON response on success, conformant to the result_schema.
+ * Returns plaintext on success if the content-type is application/octet-stream
+ * Returns a structured {'error': ...} object on client-side error
+ * Throws on server-side error
  */
 function httpRequest(options, result_schema, body) {
 
@@ -115,40 +117,39 @@ function httpRequest(options, result_schema, body) {
     }
 
     const url = `http://${options.host}:${options.port}${options.path}`;
-    return fetch(url, options).then(
-      (response) => {
+    return fetch(url, options)
+    .then((response) => {
 
-         if(response.status >= 500) {
-            throw Error(response.statusText);
-         }
+        if(response.status >= 500) {
+           throw new Error(response.statusText);
+        }
 
-         if(response.status === 404) {
-            return {'error': 'No such file or directory', 'errno': ENOENT};
-         }
+        if(response.status === 404) {
+           return {'error': 'No such file or directory', 'errno': ENOENT};
+        }
 
-         if(response.status === 403) {
-            return {'error': 'Access denied', 'errno': EACCES};
-         }
+        if(response.status === 403) {
+           return {'error': 'Access denied', 'errno': EACCES};
+        }
 
-         if(response.status === 401) {
-            return {'error': 'Invalid request', 'errno': EINVAL};
-         }
+        if(response.status === 401) {
+           return {'error': 'Invalid request', 'errno': EINVAL};
+        }
         
-         if(response.status === 400) {
-            return {'error': 'Operation not permitted', 'errno': EPERM};
-         }
+        if(response.status === 400) {
+           return {'error': 'Operation not permitted', 'errno': EPERM};
+        }
 
-         let resp = null;
-         if (response.headers.get('content-type') === 'application/json') {
-            return response.json().then( (resp) => {
-               return validateJSONResponse(resp, result_schema);
-            });
-         }
-         else {
-            return response.text();
-         }
-      } 
-    );
+        let resp = null;
+        if (response.headers.get('content-type') === 'application/json') {
+           return response.json().then( (resp) => {
+              return validateJSONResponse(resp, result_schema);
+           });
+        }
+        else {
+           return response.text();
+        }
+    });
 }
 
 
@@ -326,11 +327,8 @@ export function datastoreCreateRequest( ds_type, ds_private_key_hex, drivers, de
 
 /*
  * Create a datastore
- * Asynchronous; returns a Promise
- *
- * Returns an async object whose .end() method returns a datastore object.
- * The returned object has the following properties:
- *      
+ * Asynchronous; returns a Promise that resolves to either {'status': true} (on success)
+ * or {'error': ...} (on error)
  */
 export function datastoreCreate( blockstack_hostport, blockstack_session_token, datastore_request) {
     
@@ -411,7 +409,8 @@ export function datastoreDeleteRequest(ds=null) {
  * @param ds_tombstones (Object) OPTINOAL: signed information from datastoreDeleteRequest()
  * @param root_tombstones (Object) OPTINAL: signed information from datastoreDeleteRequest()
  *
- * Asynchronous; returns a Promise
+ * Asynchronous; returns a Promise that resolves to either {'status': true} on success
+ * or {'error': ...} on error
  */
 export function datastoreDelete(ds=null, ds_tombstones=null, root_tombstones=null) {
    
@@ -470,10 +469,14 @@ export function datastoreDelete(ds=null, ds_tombstones=null, root_tombstones=nul
  *
  * TODO: support accessing datastores from other users
  *
- * Returns an async object whose .end() method returns a datastore connection,
+ * Returns a Promise that resolves to a datastore connection,
  * with the following properties:
  *      .host: blockstack host
  *      .datastore: datastore object
+ *
+ * Returns a Promise that resolves to null, if the datastore does not exist.
+ *
+ * Throws an error on all other errors
  */
 export function datastoreMount(opts) {
 
@@ -564,8 +567,14 @@ export function datastoreMount(opts) {
 
    return httpRequest(options, DATASTORE_RESPONSE_SCHEMA).then((ds) => {
       if (!ds || ds.error) {
-         console.log(`failed to get datastore: ${JSON.stringify(ds)}`);
-         return ds;
+         // ENOENT?
+         if (!ds || ds.errno === ENOENT) {
+            return null;
+         }
+         else {
+             let errorMsg = ds.error || 'No response given';
+             throw new Error(`Failed to get datastore: ${errorMsg}`);
+         }
       }
       else {
          ctx['datastore'] = ds.datastore;
@@ -628,6 +637,7 @@ function setUserData(userData) {
 
    localStorage.setItem(LOCAL_STORAGE_ID, JSON.stringify(userData));
 }
+
 
 /*
  * Get a cached app-specific datastore mount context for a given blockchain ID and application
@@ -798,8 +808,8 @@ function selectDrivers(replication_strategy, classes) {
  * Connect to or create a datastore.
  * Asynchronous, returns a Promise
  *
- *
- * Returns a Promise that yields a datastore connection, or an error object with .error defined.
+ * Returns a Promise that yields a datastore connection.
+ * Throws on error.
  *
  */
 export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local': 1}, sessionToken=null, appPrivateKey=null) {
@@ -817,7 +827,6 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
  
    let ds = getCachedMountContext(session.blockchain_id);
    if (ds) {
-      console.log(`Using cached datastore mount context for ${session.blockchain_id}`);
       return new Promise((resolve, reject) => { resolve(ds); });
    }
     
@@ -876,42 +885,39 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
       'sessionToken': sessionToken,
    };
 
-   return datastoreMount(datastoreOpts).then(
-      (datastore_ctx) => {
-         if (datastore_ctx.error && datastore_ctx.errno === ENOENT) {
-            // does not exist
-            console.log("Datastore does not exist; creating...");
+   return datastoreMount(datastoreOpts)
+   .then((datastore_ctx) => {
+      if (!datastore_ctx) {
+         // does not exist
+         console.log("Datastore does not exist; creating...");
 
-            const info = datastoreCreateRequest('datastore', appPrivateKey, drivers, deviceID, allDeviceIDs );
+         const info = datastoreCreateRequest('datastore', appPrivateKey, drivers, deviceID, allDeviceIDs );
 
-            // go create it
-            return datastoreCreate( hostport, sessionToken, info ).then(
-               (res) => {
-                  if (res.error) {
-                     console.log(res.error);
-                     return res;
-                  }
+         // go create it
+         return datastoreCreate( hostport, sessionToken, info )
+         .then((res) => {
+            if (res.error) {
+               console.log(error);
+               let errorNo = res.errno || 'UNKNOWN';
+               let errorMsg = res.error || 'UNKNOWN';
+               throw new Error(`Failed to create datastore (errno ${errorNo}): ${errorMsg}`);
+            }
 
-                  // connect to it now
-                  return datastoreMount(datastoreOpts);
-               },
-               (error) => {
-                  console.log(error);
-                  return {'error': 'Failed to create datastore'}
-               });
-
-         }
-         else {
-            // exists
-            return datastore_ctx;
-         }
-      },
-
-      (error) => {
-         console.log(error);
-         return {'error': 'Failed to connect to storage endpoint'}
+            // connect to it now
+            return datastoreMount(datastoreOpts);
+         });
       }
-   );
+      else if (datastore_ctx.error) {
+         // some other error 
+         let errorMsg = datastore_ctx.error || 'UNKNOWN';
+         let errorNo = datastore_ctx.errno || 'UNKNOWN';
+         throw new Error(`Failed to access datastore (errno ${errorNo}): ${errorMsg}`);
+      }
+      else {
+         // exists
+         return datastore_ctx;
+      }
+   });
 }
 
 
@@ -927,7 +933,7 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
  *      .blockchain_id (String) this is the blockchain ID of the datastore owner, if different from the session token
  *      .ds (datastore context) if given, then use this datastore mount context instead of one from localstorage
  *
- * Asynchronos; call .end() on the returned object.
+ * Returns a promise that resolves to a lookup response schema (or an extended lookup response schema, if opts.extended is set)
  */
 export function lookup(path, opts={}) {
 
@@ -971,7 +977,17 @@ export function lookup(path, opts={}) {
       }
 
 
-      return httpRequest(options, schema);
+      return httpRequest(options, schema)
+      .then((lookup_response) => {
+         if (lookup_response.error || lookup_response.errno) {
+            let errorMsg = lookup_response.error || 'UNKNOWN';
+            let errorNo = lookup_response.errno || 'UNKNOWN';
+            throw new Error(`Failed to look up ${path} (errno: ${errorNo}): ${errorMsg}`);
+         }
+         else {
+            return lookup_response;
+         }
+      });
    });
 }
     
@@ -987,9 +1003,9 @@ export function lookup(path, opts={}) {
  *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
  *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
  *
- * Asynchronous; returns a Promise
+ * Asynchronous; returns a Promise that resolves to either directory idata, or an extended mutable datum response (if opts.extended is set)
  */
-export function listDir(path, opts={}) {
+export function listdir(path, opts={}) {
 
    let blockchain_id = opts.blockchain_id;
 
@@ -1031,7 +1047,17 @@ export function listDir(path, opts={}) {
          options['headers'] = {'Authorization': `bearer ${ds.session_token}`};
       }
 
-      return httpRequest(options, schema);
+      return httpRequest(options, schema)
+      .then((response) => {
+         if (response.error || response.errno) {
+            let errorMsg = response.error || 'UNKNOWN';
+            let errorNo = response.errno || 'UNKNOWN';
+            throw new Error(`Failed to listdir ${path} (errno: ${errorNo}): ${errorMsg}`);
+         }
+         else {
+            return response;
+         }
+      });
    });
 }
 
@@ -1047,7 +1073,7 @@ export function listDir(path, opts={}) {
  *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
  *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
  *
- * Asynchronous; returns a Promise
+ * Asynchronous; returns a Promise that resolves to either an inode schema, or a mutable datum extended response schema (if opts.extended is set)
  */
 export function stat(path, opts={}) {
 
@@ -1092,7 +1118,17 @@ export function stat(path, opts={}) {
          options['headers'] = {'Authorization': `bearer ${ds.session_token}`};
       } 
 
-      return httpRequest(options, schema);
+      return httpRequest(options, schema)
+      .then((response) => {
+         if (response.error || response.errno) {
+            let errorMsg = response.error || 'UNKNOWN';
+            let errorNo = response.errno || 'UNKNOWN';
+            throw new Error(`Failed to stat ${path} (errno: ${errorNo}): ${errorMsg}`);
+         }
+         else {
+            return response;
+         }
+      });
    });
 }
 
@@ -1109,7 +1145,7 @@ export function stat(path, opts={}) {
  *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
  *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
  *
- * Asynchronous; returns a Promise
+ * Asynchronous; returns a Promise that resolves to an inode and its data, or an extended mutable datum response (if opts.extended is set)
  */
 function getInode(path, opts=null) {
 
@@ -1153,7 +1189,17 @@ function getInode(path, opts=null) {
          options['headers'] = {'Authorization': `bearer ${ds.session_token}`};
       } 
 
-      return httpRequest(options, schema);
+      return httpRequest(options, schema)
+      .then((response) => {
+         if (response.error || response.errno) {
+            let errorMsg = response.error || 'UNKNOWN';
+            let errorNo = response.errno || 'UNKNOWN';
+            throw new Error(`Failed to getInode ${path} (errno: ${errorNo}): ${errorMsg}`);
+         }
+         else {
+            return response;
+         }
+      });
    });
 }
 
@@ -1169,7 +1215,8 @@ function getInode(path, opts=null) {
  *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
  *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
  *
- * Asynchronous; returns a Promise
+ * Asynchronous; returns a Promise that resolves to either raw data, or an extended mutable data response schema (if opts.extended is set).
+ * If the file does not exist, then the Promise resolves to null.  Any other errors result in an Error being thrown.
  */
 export function getFile(path, opts={}) {
 
@@ -1193,7 +1240,7 @@ export function getFile(path, opts={}) {
          'path': `/v1/stores/${datastore_id}/files?path=${escape(sanitizePath(path))}&idata=1&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${ds.blockchain_id}`,
       };
 
-      let schema = SUCCESS_FAIL_SCHEMA;
+      let schema = 'bytes';
 
       if (!opts) {
          opts = {};
@@ -1212,7 +1259,23 @@ export function getFile(path, opts={}) {
          options['headers'] = {'Authorization': `bearer ${ds.session_token}`};
       }
 
-      return httpRequest(options, schema);
+      return httpRequest(options, schema)
+      .then((response) => {
+         if (response.error || response.errno) {
+            // ENOENT?
+            if (response.errno === ENOENT) {
+               return null;
+            }
+
+            // some other error
+            let errorMsg = response.error || 'UNKNOWN';
+            let errorNo = response.errno || 'UNKNOWN';
+            throw new Error(`Failed to getFile ${path} (errno: ${errorNo}): ${errorMsg}`);
+         }
+         else {
+            return response;
+         }
+      });
    });
 }
 
@@ -1228,7 +1291,7 @@ export function getFile(path, opts={}) {
  * @param signatures (Array) the list of signatures over each inode header (also 1-to-1 correspondence)
  * @param tombstones (Array) the list of signed inode tombstones
  *
- * Asynchronous; returns a Promise
+ * Asynchronous; returns a Promise that resolves to True if the operation succeeded
  */
 function datastoreOperation(ds, operation, path, inodes, payloads, signatures, tombstones) {
 
@@ -1270,7 +1333,7 @@ function datastoreOperation(ds, operation, path, inodes, payloads, signatures, t
    }
    else {
       console.log(`invalid operation ${operation}`);
-      assert(0);
+      throw new Error(`Invalid operation ${operation}`);
    }
 
    const options = {
@@ -1300,7 +1363,17 @@ function datastoreOperation(ds, operation, path, inodes, payloads, signatures, t
    options['headers']['Content-Type'] = 'application/json';
    options['headers']['Content-Length'] = body.length;
 
-   return httpRequest(options, SUCCESS_FAIL_SCHEMA, body);
+   return httpRequest(options, SUCCESS_FAIL_SCHEMA, body)
+   .then((response) => {
+      if (response.error || response.errno) {
+         let errorMsg = response.error || 'UNKNOWN';
+         let errorNo = response.errno || 'UNKNOWN';
+         throw new Error(`Failed to ${operation} ${path} (errno: ${errorNo}): ${errorMsg}`);
+      }
+      else {
+         return true;
+      }
+   });
 }
 
 
