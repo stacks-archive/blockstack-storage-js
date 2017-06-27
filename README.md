@@ -24,6 +24,7 @@ new Promise((resolve), (reject) => {
 
       // get back the file /hello_world
       assert(fileContents === "hello world!");
+      resolve(true);
    });
 });
 ```
@@ -35,6 +36,7 @@ new Promise((resolve), (reject) => {
 
       // no data if it doesn't exist
       assert(absentFileContents === null);
+      resolve(true);
    });
 });
 ```
