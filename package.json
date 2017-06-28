@@ -1,6 +1,6 @@
 {
   "name": "blockstack-storage",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "The Blockstack Javascript library for storage.",
   "main": "lib/index",
   "scripts": {
@@ -63,7 +63,6 @@
     "express": "^4.15.0",
     "fetch-mock": "^5.5.0",
     "node-fetch": "^1.6.3",
-    "node-localstorage": "^1.3.0",
     "tape": "^4.6.3"
   },
   "dependencies": {
@@ -72,6 +71,7 @@
     "elliptic": "^6.4.0",
     "isomorphic-fetch": "^2.2.1",
     "jsontokens": "^0.7.4",
+    "node-localstorage": "^1.3.0",
     "uuid": "^3.0.1"
   }
 }
