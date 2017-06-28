@@ -7,7 +7,7 @@
     "browserify": "./node_modules/.bin/browserify lib/index.js --standalone blockstack -o ./tests/storageTests/bundle.js",
     "compile": "rm -rf lib; babel --presets es2015 src -d lib",
     "compile-tests": "rm -rf tests/storageTests/lib; babel --presets es2015 tests/storageTests/src -d tests/storageTests/lib",
-    "prepublish": "npm run compile",
+    "prepare": "npm run compile",
     "release": "npm version patch && npm publish",
     "dev-build": "npm run compile; npm run compile-tests; npm run browserify;",
     "integration-test-storage": "npm run compile; npm run compile-tests; npm run browserify; node ./tests/storageTests/lib/index.js",
