@@ -1,6 +1,6 @@
 {
   "name": "blockstack-storage",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "The Blockstack Javascript library for storage.",
   "main": "lib/index",
   "scripts": {
@@ -15,7 +15,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jcnelson/blockstack-storage-js.git"
+    "url": "git+https://github.com/blockstack/blockstack-storage-js.git"
   },
   "author": {
     "name": "Blockstack Inc.",
@@ -24,7 +24,7 @@
   },
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/jcnelson/blockstack-storage-js/issues"
+    "url": "https://github.com/blockstack/blockstack-storage-js/issues"
   },
   "keywords": [
     "blockchain",
@@ -46,6 +46,12 @@
   "contributors": [
     {
       "name": "Jude Nelson"
+    },
+    {
+      "name": "Larry Salibra"
+    },
+    {
+      "name": "Ryan Shea"
     }
   ],
   "devDependencies": {
