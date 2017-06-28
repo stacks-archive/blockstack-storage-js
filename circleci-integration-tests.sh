@@ -1,7 +1,8 @@
 #!/bin/sh
 
 BLOCKSTACK_BRANCH="rc-0.14.2"
-BLOCKSTACK_JS_BRANCH="develop-core-auth"
+BLOCKSTACK_JS_BRANCH="develop-jude"
+BLOCKSTACK_STORAGE_JS_BRANCH="master"
 
 # get bitcoind
 sudo add-apt-repository -y ppa:bitcoin/bitcoin || exit 1
@@ -33,14 +34,31 @@ cd /tmp/blockstack-core/integration_tests && ./setup.py build && ./setup.py inst
 # set up node
 npm install -g babel
 npm install -g browserify
+sudo mkdir -p /usr/lib/node_modules
 
 # get blockstack.js 
 git clone https://github.com/blockstack/blockstack.js /tmp/blockstack.js
-cd /tmp/blockstack.js && git checkout "$BLOCKSTACK_JS_BRANCH" && npm install
-sudo mkdir -p /usr/lib/node_modules
+cd /tmp/blockstack.js && git checkout "$BLOCKSTACK_JS_BRANCH" && npm install && npm link
+
+# keep the integration test framework happy
 sudo rm -rf /usr/lib/node_modules/blockstack
 sudo cp -a /tmp/blockstack.js /usr/lib/node_modules/blockstack
 
+# get blockstack-storage.js 
+git clone https://github.com/blockstack/blockstack-storage-js /tmp/blockstack-storage.js
+cd /tmp/blockstack-storage.js && git checkout "$BLOCKSTACK_STORAGE_JS_BRANCH" && npm install && npm link
+
+# keep the integration test framework happy
+sudo rm -rf /usr/lib/node_modules/blockstack-storage
+sudo cp -a /tmp/blockstack-storage.js /usr/lib/node_modules/blockstack-storage
+
 # run the relevant integration tests
 blockstack-test-scenario blockstack_integration_tests.scenarios.name_preorder_register_portal_auth || exit 1
+
+# keep the integration test framework happy
+sudo rm -rf /usr/lib/node_modules/blockstack
+sudo cp -a /tmp/blockstack.js /usr/lib/node_modules/blockstack
+sudo rm -rf /usr/lib/node_modules/blockstack-storage
+sudo cp -a /tmp/blockstack-storage.js /usr/lib/node_modules/blockstack-storage
+
 blockstack-test-scenario blockstack_integration_tests.scenarios.name_preorder_register_portal_datastore || exit 1

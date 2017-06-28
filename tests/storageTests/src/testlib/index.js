@@ -132,8 +132,8 @@ export function datastoreListdir(ds_str, path, extended, force) {
       'ds': ds,
    };
 
-   console.log(`listDir(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
-   return datastore.listDir(path, opts);
+   console.log(`listdir(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
+   return datastore.listdir(path, opts);
 }
 
 
