@@ -1,6 +1,6 @@
 {
   "name": "blockstack-storage",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "The Blockstack Javascript library for storage.",
   "main": "lib/index",
   "scripts": {
