@@ -34,7 +34,6 @@ import {
    jsonStableSerialize
 } from './util';
 
-import 'localstorage-polyfill'
 
 const http = require('http');
 const uuid4 = require('uuid/v4');
