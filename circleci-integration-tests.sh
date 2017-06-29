@@ -31,8 +31,10 @@ cd /tmp/blockstack-core && ./setup.py build && ./setup.py install
 cd /tmp/blockstack-core/integration_tests && ./setup.py build && ./setup.py install
 
 # set up node
-npm install -g babel
 npm install -g browserify
+npm uninstall -g babel
+npm install -g --save-dev babel-cli
+npm install -g --save-dev babel-preset-es2015
 
 # get blockstack.js 
 git clone https://github.com/blockstack/blockstack.js /tmp/blockstack.js
@@ -45,7 +47,6 @@ cd "$HOME"/blockstack-storage-js && rm -rf node_modules && npm link blockstack &
 sudo mkdir -p /usr/lib/node_modules
 sudo ln -s "$(npm config get prefix)"/lib/node_modules/blockstack /usr/lib/node_modules/blockstack
 sudo ln -s "$(npm config get prefix)"/lib/node_modules/blockstack-storage /usr/lib/node_modules/blockstack-storage
-sudo cp -a /tmp/blockstack-storage.js /usr/lib/node_modules/blockstack-storage
 
 # run the relevant integration tests
 blockstack-test-scenario blockstack_integration_tests.scenarios.name_preorder_register_portal_auth || exit 1
