@@ -1,6 +1,6 @@
 #!/bin/sh
 
-BLOCKSTACK_BRANCH="master"
+BLOCKSTACK_BRANCH="rc-0.14.3"
 BLOCKSTACK_JS_BRANCH="develop-jude"
 
 # get bitcoind
