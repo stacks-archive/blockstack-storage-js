@@ -33,11 +33,18 @@ cd /tmp/blockstack-core/integration_tests && ./setup.py build && ./setup.py inst
 # set up node
 npm install -g babel
 npm install -g browserify
-sudo mkdir -p /usr/lib/node_modules
 
 # get blockstack.js 
 git clone https://github.com/blockstack/blockstack.js /tmp/blockstack.js
-cd /tmp/blockstack.js && git checkout "$BLOCKSTACK_JS_BRANCH" && npm install 
+cd /tmp/blockstack.js && git checkout "$BLOCKSTACK_JS_BRANCH" && npm install && npm link
+
+# set up blockstack-storage.js
+cd "$HOME"/blockstack-storage-js && rm -rf node_modules && npm link blockstack && npm install && npm link
+
+# keep the integration framework happy
+sudo mkdir -p /usr/lib/node_modules
+sudo ln -s "$(npm config get prefix)"/lib/node_modules/blockstack /usr/lib/node_modules/blockstack
+sudo ln -s "$(npm config get prefix)"/lib/node_modules/blockstack-storage /usr/lib/node_modules/blockstack-storage
 
 exit 1
 
