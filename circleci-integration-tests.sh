@@ -45,24 +45,8 @@ cd "$HOME"/blockstack-storage-js && rm -rf node_modules && npm link blockstack &
 sudo mkdir -p /usr/lib/node_modules
 sudo ln -s "$(npm config get prefix)"/lib/node_modules/blockstack /usr/lib/node_modules/blockstack
 sudo ln -s "$(npm config get prefix)"/lib/node_modules/blockstack-storage /usr/lib/node_modules/blockstack-storage
-
-exit 1
-
-# keep the integration test framework happy
-sudo rm -rf /usr/lib/node_modules/blockstack
-sudo cp -a /tmp/blockstack.js /usr/lib/node_modules/blockstack
-
-# keep the integration test framework happy
-sudo rm -rf /usr/lib/node_modules/blockstack-storage
 sudo cp -a /tmp/blockstack-storage.js /usr/lib/node_modules/blockstack-storage
 
 # run the relevant integration tests
 blockstack-test-scenario blockstack_integration_tests.scenarios.name_preorder_register_portal_auth || exit 1
-
-# keep the integration test framework happy
-sudo rm -rf /usr/lib/node_modules/blockstack
-sudo cp -a /tmp/blockstack.js /usr/lib/node_modules/blockstack
-sudo rm -rf /usr/lib/node_modules/blockstack-storage
-sudo cp -a /tmp/blockstack-storage.js /usr/lib/node_modules/blockstack-storage
-
 blockstack-test-scenario blockstack_integration_tests.scenarios.name_preorder_register_portal_datastore || exit 1
