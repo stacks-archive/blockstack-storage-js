@@ -1,8 +1,7 @@
 #!/bin/sh
 
-BLOCKSTACK_BRANCH="rc-0.14.2"
+BLOCKSTACK_BRANCH="master"
 BLOCKSTACK_JS_BRANCH="develop-jude"
-BLOCKSTACK_STORAGE_JS_BRANCH="master"
 
 # get bitcoind
 sudo add-apt-repository -y ppa:bitcoin/bitcoin || exit 1
@@ -38,15 +37,13 @@ sudo mkdir -p /usr/lib/node_modules
 
 # get blockstack.js 
 git clone https://github.com/blockstack/blockstack.js /tmp/blockstack.js
-cd /tmp/blockstack.js && git checkout "$BLOCKSTACK_JS_BRANCH" && npm install && npm link
+cd /tmp/blockstack.js && git checkout "$BLOCKSTACK_JS_BRANCH" && npm install 
+
+exit 1
 
 # keep the integration test framework happy
 sudo rm -rf /usr/lib/node_modules/blockstack
 sudo cp -a /tmp/blockstack.js /usr/lib/node_modules/blockstack
-
-# get blockstack-storage.js 
-git clone https://github.com/blockstack/blockstack-storage-js /tmp/blockstack-storage.js
-cd /tmp/blockstack-storage.js && git checkout "$BLOCKSTACK_STORAGE_JS_BRANCH" && npm install && npm link
 
 # keep the integration test framework happy
 sudo rm -rf /usr/lib/node_modules/blockstack-storage
