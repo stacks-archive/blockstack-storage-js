@@ -17,7 +17,7 @@ pip install --upgrade cryptography
 pip install --upgrade scrypt
 pip install --upgrade fastecdsa
 
-# fetch and install virtualchain 
+# fetch and install virtualchain
 git clone https://github.com/blockstack/virtualchain /tmp/virtualchain
 cd /tmp/virtualchain && git checkout "$BLOCKSTACK_BRANCH"
 cd /tmp/virtualchain && ./setup.py build && ./setup.py install
@@ -27,7 +27,7 @@ git clone https://github.com/blockstack/blockstack-core /tmp/blockstack-core
 cd /tmp/blockstack-core && git checkout "$BLOCKSTACK_BRANCH"
 
 # install blockstack core and integration tests
-cd /tmp/blockstack-core && ./setup.py build && ./setup.py install 
+cd /tmp/blockstack-core && ./setup.py build && ./setup.py install
 cd /tmp/blockstack-core/integration_tests && ./setup.py build && ./setup.py install
 
 # set up node
@@ -36,12 +36,12 @@ npm uninstall -g babel
 npm install -g --save-dev babel-cli
 npm install -g --save-dev babel-preset-es2015
 
-# get blockstack.js 
+# get blockstack.js
 git clone https://github.com/blockstack/blockstack.js /tmp/blockstack.js
 cd /tmp/blockstack.js && git checkout "$BLOCKSTACK_JS_BRANCH" && npm install && npm link
 
 # set up blockstack-storage.js
-cd "$HOME"/blockstack-storage-js && rm -rf node_modules && npm link blockstack && npm install && npm link
+cd "$HOME"/blockstack-storage-js && rm -rf node_modules && npm install && npm link blockstack && npm link
 
 # keep the integration framework happy
 sudo mkdir -p /usr/lib/node_modules

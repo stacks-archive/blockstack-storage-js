@@ -34,6 +34,7 @@ import {
    jsonStableSerialize
 } from './util';
 
+
 const http = require('http');
 const uuid4 = require('uuid/v4');
 const bitcoinjs = require('bitcoinjs-lib');
@@ -103,7 +104,7 @@ function validateJSONResponse(resp, result_schema) {
 /*
  * Helper method to issue an HTTP request.
  * @param options (Object) set of HTTP request options
- * @param result_schema (Object) JSON schema of the expected result 
+ * @param result_schema (Object) JSON schema of the expected result
  *
  * Returns a structured JSON response on success, conformant to the result_schema.
  * Returns plaintext on success if the content-type is application/octet-stream
@@ -135,7 +136,7 @@ function httpRequest(options, result_schema, body) {
         if(response.status === 401) {
            return {'error': 'Invalid request', 'errno': EINVAL};
         }
-        
+
         if(response.status === 400) {
            return {'error': 'Operation not permitted', 'errno': EPERM};
         }
@@ -209,7 +210,7 @@ function getPublicKeyList(datastore_ctx) {
  * Returns the sanitized path.
  */
 export function sanitizePath( path) {
-   
+
     const parts = path.split('/').filter(function(x) {return x.length > 0;});
     const retparts = [];
 
@@ -251,7 +252,7 @@ export function basename(path) {
  * a host and port
  *
  * @param hostport (String) the host:port
- * 
+ *
  * Returns an object with:
  *      .host
  *      .port
@@ -281,7 +282,7 @@ export function datastoreCreateRequest( ds_type, ds_private_key_hex, drivers, de
 
    assert(ds_type === 'datastore' || ds_type === 'collection');
    const root_uuid = uuid4();
-   
+
    const ds_public_key = getPubkeyHex(ds_private_key_hex);
    const datastore_id = datastoreGetId( ds_public_key );
    const root_blob_info = makeDirInodeBlob( datastore_id, datastore_id, root_uuid, {}, device_id, 1 );
@@ -294,7 +295,7 @@ export function datastoreCreateRequest( ds_type, ds_private_key_hex, drivers, de
       'device_ids': all_device_ids,
       'root_uuid': root_uuid,
    };
-    
+
    const data_id = `${datastore_id}.datastore`;
    const datastore_blob = makeMutableDataInfo( data_id, jsonStableSerialize(datastore_info), device_id, 1 );
 
@@ -311,13 +312,13 @@ export function datastoreCreateRequest( ds_type, ds_private_key_hex, drivers, de
    const info = {
       'datastore_info': {
          'datastore_id': datastore_id,
-         'datastore_blob': datastore_str, 
+         'datastore_blob': datastore_str,
          'root_blob_header': root_blob_info.header,
          'root_blob_idata': root_blob_info.idata,
       },
       'datastore_sigs': {
-         'datastore_sig': datastore_sig, 
-         'root_sig': root_sig, 
+         'datastore_sig': datastore_sig,
+         'root_sig': root_sig,
       },
       'root_tombstones': signed_tombstones,
    };
@@ -332,7 +333,7 @@ export function datastoreCreateRequest( ds_type, ds_private_key_hex, drivers, de
  * or {'error': ...} (on error)
  */
 export function datastoreCreate( blockstack_hostport, blockstack_session_token, datastore_request) {
-    
+
    const payload = {
       'datastore_info': {
           'datastore_blob': datastore_request.datastore_info.datastore_blob,
@@ -412,7 +413,7 @@ export function datastoreDeleteRequest(ds=null) {
  * or {'error': ...} on error
  */
 export function datastoreDelete(ds=null, ds_tombstones=null, root_tombstones=null) {
-   
+
    if (!ds) {
       const blockchain_id = getSessionBlockchainID();
       assert(blockchain_id);
@@ -458,7 +459,7 @@ export function datastoreDelete(ds=null, ds_tombstones=null, root_tombstones=nul
  * * appPrivateKey (string) the application private key
  * * (optional) sessionToken (string) the Core session token, OR
  * * (optional) device_id (string) the device ID
- * 
+ *
  * OR:
  *
  * * blockchainID (string) the blockchain ID of the user whose datastore we're going to access
@@ -538,7 +539,7 @@ export function datastoreMount(opts) {
 
    const blockstack_hostport = api_endpoint.split('://').reverse()[0];
    const hostinfo = splitHostPort(blockstack_hostport);
-   
+
    const ctx = {
       'host': hostinfo.host,
       'port': hostinfo.port,
@@ -548,7 +549,7 @@ export function datastoreMount(opts) {
       'app_public_keys': app_public_keys,
       'datastore': null,
    };
- 
+
    if (data_privkey_hex) {
       ctx.privkey_hex = data_privkey_hex;
    }
@@ -576,7 +577,10 @@ export function datastoreMount(opts) {
       else {
          ctx['datastore'] = ds.datastore;
 
-         // this is required for testing purposes, since the core session token will not have been set 
+         // save
+         setCachedMountContext(blockchain_id, ctx);
+
+         // this is required for testing purposes, since the core session token will not have been set
          let userData = getUserData();
          if (!userData.coreSessionToken) {
             console.log("In test framework; saving session token");
@@ -598,16 +602,6 @@ export function datastoreMount(opts) {
  * Throws on error
  */
 function getUserData() {
-   let localStorage = null;
-    
-   if (typeof window === 'undefined' || window === null) {
-      const LocalStorage = require('node-localstorage').LocalStorage;
-      localStorage = new LocalStorage('./scratch');
-   }
-   else {
-      localStorage = window.localStorage;
-   }
-
    let userData = localStorage.getItem(LOCAL_STORAGE_ID);
    if (userData === null) {
       userData = '{}';
@@ -622,16 +616,6 @@ function getUserData() {
  * Save local storage
  */
 function setUserData(userData) {
-   let localStorage = null;
-    
-   if (typeof window === 'undefined' || window === null) {
-      const LocalStorage = require('node-localstorage').LocalStorage;
-      localStorage = new LocalStorage('./scratch');
-   }
-   else {
-      localStorage = window.localStorage;
-   }
-
    localStorage.setItem(LOCAL_STORAGE_ID, JSON.stringify(userData));
 }
 
@@ -763,7 +747,7 @@ function selectDrivers(replication_strategy, classes) {
 
    for (let d of all_drivers) {
       let classes = driver_classes[d];
-     
+
       // a driver fits the replication strategy if all of its
       // classes matches at least one concern (i.e. 'local', 'public')
       for (let concern of Object.keys(replication_strategy)) {
@@ -843,15 +827,15 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
       assert(sessionToken);
    }
 
-   // decode 
+   // decode
    const session = jsontokens.decodeToken(sessionToken).payload;
    assert(session.blockchain_id);
- 
+
    let ds = getCachedMountContext(session.blockchain_id);
    if (ds) {
       return new Promise((resolve, reject) => { resolve(ds); });
    }
-    
+
    // no cached datastore context.
    // go ahead and create one (need appPrivateKey)
    if(!appPrivateKey) {
@@ -861,7 +845,7 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
       assert(appPrivateKey);
    }
 
-   // sanity check 
+   // sanity check
    for (let strategy of Object.keys(replication_strategy)) {
       let supported = false;
       for (let supported_strategy of Object.keys(REPLICATION_STRATEGY_CLASSES)) {
@@ -878,7 +862,7 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
 
    let drivers = null;
 
-   // find satisfactory storage drivers 
+   // find satisfactory storage drivers
    if (Object.keys(session.storage.preferences).includes(session.app_domain)) {
 
       // app-specific preference
@@ -898,7 +882,7 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
    for (let i = 0; i < appPublicKeys.length; i++) {
       allDeviceIDs.push(appPublicKeys[i].device_id);
    }
-   
+
    console.log(`Will use drivers ${drivers.join(',')}`);
    console.log(`Datastore will span devices ${allDeviceIDs.join(',')}`);
 
@@ -930,7 +914,7 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
          });
       }
       else if (datastore_ctx.error) {
-         // some other error 
+         // some other error
          let errorMsg = datastore_ctx.error || 'UNKNOWN';
          let errorNo = datastore_ctx.errno || 'UNKNOWN';
          throw new Error(`Failed to access datastore (errno ${errorNo}): ${errorMsg}`);
@@ -944,8 +928,8 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
 
 
 /*
- * Path lookup 
- * 
+ * Path lookup
+ *
  * @param ds (Object) a datastore context
  * @param path (String) the path to the inode
  * @param opts (Object) optional arguments:
@@ -1011,7 +995,7 @@ export function lookup(path, opts={}) {
       });
    });
 }
-    
+
 
 /*
  * List a directory.
@@ -1079,7 +1063,7 @@ export function listdir(path, opts={}) {
 }
 
 
-/* 
+/*
  * Stat a file or directory (i.e. get the inode header)
  *
  * @param ds (Object) a datastore context
@@ -1126,7 +1110,7 @@ export function stat(path, opts={}) {
          options['path'] += '&extended=1';
          schema = MUTABLE_DATUM_EXTENDED_RESPONSE_SCHEMA;
       }
-      
+
       if (opts.force) {
          optsion['path'] += '&force=1';
       }
@@ -1146,7 +1130,7 @@ export function stat(path, opts={}) {
 }
 
 
-/* 
+/*
  * Get an undifferentiated file or directory and its data.
  * Low-level method, not meant for external consumption.
  *
@@ -1184,6 +1168,15 @@ function getInode(path, opts={}) {
       };
 
       let schema = MUTABLE_DATUM_EXTENDED_RESPONSE_SCHEMA;
+
+      if (!opts) {
+         opts = {};
+      }
+
+      if (opts.extended) {
+         options['path'] += '&extended=1';
+         schema = MUTABLE_DATUM_EXTENDED_RESPONSE_SCHEMA;
+      }
 
       if (opts.force) {
          options['path'] += '&force=1';
@@ -1295,7 +1288,7 @@ export function getFile(path, opts={}) {
 /*
  * Execute a datastore operation
  *
- * @param ds (Object) a datastore context 
+ * @param ds (Object) a datastore context
  * @param operation (String) the specific operation being carried out.
  * @param path (String) the path of the operation
  * @param inodes (Array) the list of inode headers to replicate
@@ -1358,7 +1351,7 @@ function datastoreOperation(ds, operation, path, inodes, payloads, signatures, t
    options['headers'] = {'Authorization': `bearer ${getSessionToken()}`}
 
    const datastore_str = JSON.stringify(ds.datastore);
-   const datastore_sig = signRawData( datastore_str, datastore_privkey ); 
+   const datastore_sig = signRawData( datastore_str, datastore_privkey );
 
    const body_struct = {
       'inodes': inodes,
@@ -1461,7 +1454,7 @@ export function putFile(path, file_buffer, opts={}) {
 
       assert(typeof(file_buffer) === 'string' || (file_buffer instanceof Buffer));
 
-      // get parent dir 
+      // get parent dir
       return getParent(path, opts)
       .then((parent_dir) => {
          if (parent_dir.error) {
@@ -1497,7 +1490,7 @@ export function putFile(path, file_buffer, opts={}) {
          }
          else {
 
-            // new 
+            // new
             inode_uuid = uuid4();
             new_parent_dir_inode = inodeDirLink(parent_dir, MUTABLE_DATUM_FILE_TYPE, child_name, inode_uuid, false );
          }
@@ -1549,22 +1542,22 @@ export function mkdir(path, opts={}) {
             throw new Error(`Failed to look up ${dirname(path)}: ${parent_dir.error}`);
          }
 
-         // must not exist 
+         // must not exist
          if (Object.keys(parent_dir['idata']['children']).includes(child_name)) {
             return {'error': 'File or directory exists', 'errno': EEXIST};
          }
 
-         // make the directory inode information 
+         // make the directory inode information
          const inode_uuid = uuid4();
          const inode_info = makeDirInodeBlob( datastore_id, datastore_id, inode_uuid, {}, device_id);
          const inode_sig = signDataPayload( inode_info['header'], privkey_hex );
 
-         // make the new parent directory information 
+         // make the new parent directory information
          const new_parent_dir_inode = inodeDirLink(parent_dir, MUTABLE_DATUM_DIR_TYPE, child_name, inode_uuid);
          const new_parent_info = makeDirInodeBlob( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata']['children'], device_id, new_parent_dir_inode['version'] + 1);
          const new_parent_sig = signDataPayload( new_parent_info['header'], privkey_hex );
 
-         // post them 
+         // post them
          return datastoreOperation(ds, 'mkdir', path, [inode_info['header'], new_parent_info['header']], [inode_info['idata'], new_parent_info['idata']], [inode_sig, new_parent_sig], []);
       });
    });
@@ -1572,7 +1565,7 @@ export function mkdir(path, opts={}) {
 
 
 /*
- * Delete a file 
+ * Delete a file
  *
  * @param ds (Object) datastore context
  * @param path (String) path to the directory
@@ -1610,16 +1603,16 @@ export function deleteFile(path, opts={}) {
 
          const inode_uuid = parent_dir['idata']['children'][child_name]['uuid'];
 
-         // unlink 
+         // unlink
          const new_parent_dir_inode = inodeDirUnlink(parent_dir, child_name);
          const new_parent_info = makeDirInodeBlob( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata']['children'], device_id, new_parent_dir_inode['version'] + 1 );
          const new_parent_sig = signDataPayload( new_parent_info['header'], privkey_hex );
 
-         // make tombstones 
+         // make tombstones
          const tombstones = makeInodeTombstones(datastore_id, inode_uuid, all_device_ids);
          const signed_tombstones = signMutableDataTombstones(tombstones, privkey_hex);
-   
-         // post them 
+
+         // post them
          return datastoreOperation(ds, 'deleteFile', path, [new_parent_info['header']], [new_parent_info['idata']], [new_parent_sig], signed_tombstones);
       });
    });
@@ -1627,7 +1620,7 @@ export function deleteFile(path, opts={}) {
 
 
 /*
- * Remove a directory 
+ * Remove a directory
  *
  * @param ds (Object) datastore context
  * @param path (String) path to the directory
@@ -1665,19 +1658,17 @@ export function rmdir(path, opts={}) {
 
          const inode_uuid = parent_dir['idata']['children'][child_name]['uuid'];
 
-         // unlink 
+         // unlink
          const new_parent_dir_inode = inodeDirUnlink(parent_dir, child_name);
          const new_parent_info = makeDirInodeBlob( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata']['children'], device_id, new_parent_dir_inode['version'] + 1 );
          const new_parent_sig = signDataPayload( new_parent_info['header'], privkey_hex );
 
-         // make tombstones 
+         // make tombstones
          const tombstones = makeInodeTombstones(datastore_id, inode_uuid, all_device_ids);
          const signed_tombstones = signMutableDataTombstones(tombstones, privkey_hex);
 
-         // post them 
+         // post them
          return datastoreOperation(ds, 'rmdir', path, [new_parent_info['header']], [new_parent_info['idata']], [new_parent_sig], signed_tombstones);
       });
    });
 }
-
-

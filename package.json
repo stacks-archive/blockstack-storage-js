@@ -1,13 +1,13 @@
 {
   "name": "blockstack-storage",
-  "version": "0.0.1",
+  "version": "0.2.6",
   "description": "The Blockstack Javascript library for storage.",
   "main": "lib/index",
   "scripts": {
     "browserify": "./node_modules/.bin/browserify lib/index.js --standalone blockstack -o ./tests/storageTests/bundle.js",
     "compile": "rm -rf lib; babel --presets es2015 src -d lib",
     "compile-tests": "rm -rf tests/storageTests/lib; babel --presets es2015 tests/storageTests/src -d tests/storageTests/lib",
-    "prepublish": "npm run compile",
+    "prepare": "npm run compile",
     "release": "npm version patch && npm publish",
     "dev-build": "npm run compile; npm run compile-tests; npm run browserify;",
     "integration-test-storage": "npm run compile; npm run compile-tests; npm run browserify; node ./tests/storageTests/lib/index.js",
@@ -15,7 +15,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jcnelson/blockstack-storage-js.git"
+    "url": "git+https://github.com/blockstack/blockstack-storage-js.git"
   },
   "author": {
     "name": "Blockstack Inc.",
@@ -24,7 +24,7 @@
   },
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/jcnelson/blockstack-storage-js/issues"
+    "url": "https://github.com/blockstack/blockstack-storage-js/issues"
   },
   "keywords": [
     "blockchain",
@@ -46,6 +46,12 @@
   "contributors": [
     {
       "name": "Jude Nelson"
+    },
+    {
+      "name": "Larry Salibra"
+    },
+    {
+      "name": "Ryan Shea"
     }
   ],
   "devDependencies": {
@@ -56,8 +62,8 @@
     "browserify": "^13.1.1",
     "express": "^4.15.0",
     "fetch-mock": "^5.5.0",
+    "localstorage-polyfill": "^1.0.1",
     "node-fetch": "^1.6.3",
-    "node-localstorage": "^1.3.0",
     "tape": "^4.6.3"
   },
   "dependencies": {
