@@ -279,7 +279,7 @@ else if( command == 'unittest' ) {
 
            console.log(`ping result: ${JSON.stringify(res)}`);
 
-           var auth_request = makeAuthRequest(datastore_privkey_hex, "https://www.foo.com", "https://www.foo.com/manifest.json", "https://www.foo.com/login", ['store_read', 'store_write', 'store_admin']);
+           var auth_request = makeAuthRequest(datastore_privkey_hex, "https://www.foo.com/manifest.json", "https://www.foo.com/login", ['store_read', 'store_write', 'store_admin'], "www.foo.com");
            return getCoreSession('localhost', 16268, api_password, datastore_privkey_hex, "judecn.id", auth_request);
 
       }, (error) => {console.log(JSON.stringify(error)); process.exit(1);})
