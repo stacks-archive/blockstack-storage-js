@@ -510,6 +510,10 @@ export function datastoreMount(opts) {
       blockchain_id = opts.blockchainID;
       const app_name = opts.appName;
 
+       if (!blockchain_id){
+          blockchain_id = getSessionBlockchainID();
+       }
+
       assert(blockchain_id);
       assert(app_name);
 
@@ -530,7 +534,9 @@ export function datastoreMount(opts) {
 
    if (!blockchain_id) {
       blockchain_id = session.blockchain_id;
-      assert(blockchain_id);
+      if (!blockchain_id){
+         blockchain_id = getSessionBlockchainID();
+      }
    }
 
    if (!app_public_keys) {
@@ -675,8 +681,11 @@ function getSessionBlockchainID() {
 
    const session = jsontokens.decodeToken(userData.coreSessionToken).payload;
 
-   assert(session.blockchain_id);
-   return session.blockchain_id;
+   if (! session.blockchain_id ){
+       return 'temporary.test';
+   }else{
+       return session.blockchain_id;
+   }
 }
 
 
@@ -804,9 +813,12 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
 
    // decode
    const session = jsontokens.decodeToken(sessionToken).payload;
-   assert(session.blockchain_id);
+   var blockchain_id = session.blockchain_id;
+   if (!blockchain_id){
+       blockchain_id = getSessionBlockchainID();
+   }
 
-   let ds = getCachedMountContext(session.blockchain_id);
+   let ds = getCachedMountContext(blockchain_id);
    if (ds) {
       return new Promise((resolve, reject) => { resolve(ds); });
    }
