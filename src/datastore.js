@@ -577,9 +577,6 @@ export function datastoreMount(opts) {
       else {
          ctx['datastore'] = ds.datastore;
 
-         // save
-         setCachedMountContext(blockchain_id, ctx);
-
          // this is required for testing purposes, since the core session token will not have been set
          let userData = getUserData();
          if (!userData.coreSessionToken) {
@@ -598,10 +595,32 @@ export function datastoreMount(opts) {
 
 
 /*
+ * Get a reference to our localStorage implementation
+ */
+function getLocalStorage() {
+   // uncomment when testing locally.  Make sure node-localstorage is installed!
+   /*
+   let localStorage = null;
+    
+   if (typeof window === 'undefined' || window === null) {
+      const LocalStorage = require('node-localstorage').LocalStorage;
+      localStorage = new LocalStorage('./scratch');
+   }
+   else {
+      localStorage = window.localStorage;
+   }
+   */
+   return localStorage;
+}
+
+
+/*
  * Get local storage object for Blockstack
  * Throws on error
  */
 function getUserData() {
+
+   const localStorage = getLocalStorage();
    let userData = localStorage.getItem(LOCAL_STORAGE_ID);
    if (userData === null) {
       userData = '{}';
@@ -616,6 +635,8 @@ function getUserData() {
  * Save local storage
  */
 function setUserData(userData) {
+
+   const localStorage = getLocalStorage();
    localStorage.setItem(LOCAL_STORAGE_ID, JSON.stringify(userData));
 }
 
