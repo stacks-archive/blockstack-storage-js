@@ -21,6 +21,7 @@ import {
    signDataPayload,
    signRawData,
    hashDataPayload,
+   hashRawData,
    inodeDirLink,
    inodeDirUnlink,
    decodePrivateKey,
@@ -533,10 +534,7 @@ export function datastoreMount(opts) {
    }
 
    if (!blockchain_id) {
-      blockchain_id = session.blockchain_id;
-      if (!blockchain_id){
-         blockchain_id = getSessionBlockchainID();
-      }
+      blockchain_id = getBlockchainIDFromSessionOrDefault(session);
    }
 
    if (!app_public_keys) {
@@ -668,6 +666,13 @@ function setCachedMountContext(blockchain_id, datastore_context) {
    setUserData(userData);
 }
 
+function getBlockchainIDFromSessionOrDefault(session) {
+   if (! session.blockchain_id ){
+       return hashRawData(Buffer.from(session.app_user_id).toString('base64'));
+   }else{
+       return session.blockchain_id;
+   }
+}
 
 /*
  * Get the current session's blockchain ID
@@ -681,11 +686,7 @@ function getSessionBlockchainID() {
 
    const session = jsontokens.decodeToken(userData.coreSessionToken).payload;
 
-   if (! session.blockchain_id ){
-       return 'temporary.test';
-   }else{
-       return session.blockchain_id;
-   }
+   return getBlockchainIDFromSessionOrDefault(session);
 }
 
 
@@ -813,10 +814,7 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
 
    // decode
    const session = jsontokens.decodeToken(sessionToken).payload;
-   var blockchain_id = session.blockchain_id;
-   if (!blockchain_id){
-       blockchain_id = getSessionBlockchainID();
-   }
+   var blockchain_id = getBlockchainIDFromSessionOrDefault(session);
 
    let ds = getCachedMountContext(blockchain_id);
    if (ds) {
