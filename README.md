@@ -43,6 +43,8 @@ new Promise((resolve), (reject) => {
 
 ## Making a directory
 
+NOTE: this is not part of the "stable" API.  Do not rely on it.
+
 ```
 new Promise((resolve), (reject) => {
    blockstack.mkdir("/home")
@@ -68,6 +70,8 @@ new Promise((resolve), (reject) => {
 ```
 
 ## Listing directories
+
+NOTE: this is not part of the "stable" API.  Do not rely on it.
 
 ```
 new Promise((resolve), (reject) => {
@@ -122,6 +126,8 @@ new Promise((resolve), (reject) => {
 
 
 ## Removing a directory
+
+NOTE: this is not part of the "stable" API.  Do not rely on it.
 
 ```
 new Promise((resolve), (reject) => {
