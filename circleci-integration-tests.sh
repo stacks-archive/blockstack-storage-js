@@ -30,6 +30,9 @@ cd /tmp/blockstack-core && git checkout "$BLOCKSTACK_BRANCH"
 cd /tmp/blockstack-core && ./setup.py build && ./setup.py install
 cd /tmp/blockstack-core/integration_tests && ./setup.py build && ./setup.py install
 
+# install npm 5
+npm install -g npm@^5.3.0
+
 # set up node
 npm install -g browserify
 npm uninstall -g babel
