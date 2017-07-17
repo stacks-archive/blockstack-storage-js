@@ -1,7 +1,7 @@
 #!/bin/sh
 
 BLOCKSTACK_BRANCH="rc-0.14.3"
-BLOCKSTACK_JS_BRANCH="develop-jude"
+BLOCKSTACK_JS_BRANCH="master"
 
 # get bitcoind
 sudo add-apt-repository -y ppa:bitcoin/bitcoin || exit 1
@@ -29,6 +29,9 @@ cd /tmp/blockstack-core && git checkout "$BLOCKSTACK_BRANCH"
 # install blockstack core and integration tests
 cd /tmp/blockstack-core && ./setup.py build && ./setup.py install
 cd /tmp/blockstack-core/integration_tests && ./setup.py build && ./setup.py install
+
+# install npm 5
+npm install -g npm@^5.3.0
 
 # set up node
 npm install -g browserify

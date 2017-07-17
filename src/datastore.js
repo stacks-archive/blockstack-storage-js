@@ -21,6 +21,7 @@ import {
    signDataPayload,
    signRawData,
    hashDataPayload,
+   hashRawData,
    inodeDirLink,
    inodeDirUnlink,
    decodePrivateKey,
@@ -509,13 +510,12 @@ export function datastoreMount(opts) {
           assert(sessionToken);
        }
 
-       if (!data_privkey_hex) {
-          // load from localStorage
-          const userData = getUserData();
-
-          data_privkey_hex = userData.appPrivateKey;
-          assert(data_privkey_hex);
+       if (!blockchain_id){
+          blockchain_id = getSessionBlockchainID();
        }
+
+      assert(blockchain_id);
+      assert(app_name);
 
        const session = jsontokens.decodeToken(sessionToken).payload;
 
@@ -532,10 +532,24 @@ export function datastoreMount(opts) {
       throw new Error("Multiplayer storage is not supported yet");
    }
 
-   assert(device_id);
-   assert(api_endpoint);
-   assert(blockchain_id);
-   assert(app_public_keys);
+   if (!device_id) {
+      device_id = session.device_id;
+      assert(device_id);
+   }
+
+   if (!api_endpoint) {
+      api_endpoint = session.api_endpoint;
+      assert(api_endpoint);
+   }
+
+   if (!blockchain_id) {
+      blockchain_id = getBlockchainIDFromSessionOrDefault(session);
+   }
+
+   if (!app_public_keys) {
+      app_public_keys = session.app_public_keys;
+      assert(app_public_keys);
+   }
 
    const blockstack_hostport = api_endpoint.split('://').reverse()[0];
    const hostinfo = splitHostPort(blockstack_hostport);
@@ -666,6 +680,13 @@ function setCachedMountContext(blockchain_id, datastore_context) {
    setUserData(userData);
 }
 
+function getBlockchainIDFromSessionOrDefault(session) {
+   if (! session.blockchain_id ){
+       return hashRawData(Buffer.from(session.app_user_id).toString('base64'));
+   }else{
+       return session.blockchain_id;
+   }
+}
 
 /*
  * Get the current encoded session token
@@ -680,28 +701,7 @@ function getSessionToken() {
 }
 
 
-/*
- * Get the current decoded session token
- */
-function getSession(sessionToken=null) {
-    
-   let coreSessionToken = sessionToken;
-   if (!coreSessionToken) {
-       coreSessionToken = getSessionToken();
-   }
-
-   const session = jsontokens.decodeToken(coreSessionToken).payload;
-   return session;
-}
-
-
-/*
- * Get the current session's blockchain ID
- * Throw if not defined or not present.
- */
-function getSessionBlockchainID(sessionToken=null) {
-
-   return getSession(sessionToken).blockchain_id;
+   return getBlockchainIDFromSessionOrDefault(session);
 }
 
 
@@ -829,9 +829,9 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
 
    // decode
    const session = jsontokens.decodeToken(sessionToken).payload;
-   assert(session.blockchain_id);
+   var blockchain_id = getBlockchainIDFromSessionOrDefault(session);
 
-   let ds = getCachedMountContext(session.blockchain_id);
+   let ds = getCachedMountContext(blockchain_id);
    if (ds) {
       return new Promise((resolve, reject) => { resolve(ds); });
    }

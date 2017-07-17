@@ -1,6 +1,10 @@
 'use strict'
 
-import { 
+import MockLocalStorage from 'mock-localstorage'
+
+global.localStorage = new MockLocalStorage()
+
+import {
    createDatastore,
    deleteDatastore,
    getDatastore,
@@ -138,7 +142,7 @@ function file_expect(ds_str, file_path, content) {
               return false;
            }
         }
-        
+
         if( idata != content ) {
            console.log(`expected ${content}; got ${idata}`);
         }
@@ -177,7 +181,7 @@ function file_absent(ds_str, file_path) {
 function http_request(options) {
 
    var p = new Promise(function(resolve, reject) {
-      http.request(options, function(response) {    
+      http.request(options, function(response) {
          var strbuf = [];
          response.on('data', function(chunk) {
             strbuf.push(chunk);
@@ -192,7 +196,7 @@ function http_request(options) {
             var resp = JSON.parse(str);
             str = null;
             strbuf = null;
-              
+
             resolve(resp);
          });
 
@@ -216,7 +220,7 @@ function node_ping(host, port) {
 }
 
 
-if( command == 'createDatastore' ) { 
+if( command == 'createDatastore' ) {
    assert(args.length >= 5);
    res = createDatastore(args[1], args[2], args[3], args[4], args[5])
 }
@@ -258,7 +262,7 @@ else if( command == 'stat' ) {
 }
 else if( command == 'unittest' ) {
    var hdr = makeInodeHeaderBlob("1BjnYXfXbh84Xrc24zM1GFvCrXenp8AqUZ", 2, "1BjnYXfXbh84Xrc24zM1GFvCrXenp8AqUZ", "86ce29a7-0714-4136-bfbc-d48f2e55afd4", "9ceb6a079746a67defdadd7ad19a4c9e070a7e5dd2d41df9fc6e3d289e8e49c4", "c429b777-c7b9-4e07-99ba-7cdf98a283c3", 1);
-      
+
    var api_password = "blockstack_integration_test_api_password";
    var device_id = 'c429b777-c7b9-4e07-99ba-7cdf98a283c3';
    var datastore_privkey = bitcoinjs.ECPair.makeRandom();
@@ -269,7 +273,7 @@ else if( command == 'unittest' ) {
    var datastore = null;
    var datastore_str = null;
    var session_token = null;
-  
+
    console.log(`private key is ${datastore_privkey_hex}`);
    console.log(`public key is ${datastore_pubkey_hex}`);
    console.log("begin ping");
@@ -279,12 +283,12 @@ else if( command == 'unittest' ) {
 
            console.log(`ping result: ${JSON.stringify(res)}`);
 
-           var auth_request = makeAuthRequest(datastore_privkey_hex, "https://www.foo.com", "https://www.foo.com/manifest.json", "https://www.foo.com/login", ['store_read', 'store_write', 'store_admin']);
+           var auth_request = makeAuthRequest(datastore_privkey_hex, "https://www.foo.com/login", "https://www.foo.com/manifest.json", ['store_read', 'store_write', 'store_admin'], "https://www.foo.com");
            return getCoreSession('localhost', 16268, api_password, datastore_privkey_hex, "judecn.id", auth_request);
 
       }, (error) => {console.log(JSON.stringify(error)); process.exit(1);})
       .then((token_res) => {
-            
+
            console.log(`session result: ${JSON.stringify(token_res)}`);
            session_token = token_res;
            if( !session_token ) {
@@ -296,13 +300,13 @@ else if( command == 'unittest' ) {
 
       }, (error) => {console.log("get session token failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
-       
+
            console.log(`getOrCreateDatastore (create) result: ${JSON.stringify(res)}`);
            if( res.error ) {
               console.log(res);
               process.exit(1);
            }
-        
+
            // make sure it's idempotent
            return getOrCreateDatastore({'local': 1}, session_token, datastore_privkey_hex);
 
@@ -411,7 +415,7 @@ else if( command == 'unittest' ) {
            }
 
            return stat_dir(datastore_str, '/');
-      
+
       }, (error) => {console.log("listdir /dir1 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
@@ -420,7 +424,7 @@ else if( command == 'unittest' ) {
               process.exit(1);
            }
            return stat_dir(datastore_str, '/dir1');
-      
+
       }, (error) => {console.log("stat dir / failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
@@ -429,7 +433,7 @@ else if( command == 'unittest' ) {
               process.exit(1);
            }
            return stat_dir(datastore_str, '/dir1/dir2');
-      
+
       }, (error) => {console.log("stat dir /dir1 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
@@ -438,7 +442,7 @@ else if( command == 'unittest' ) {
               process.exit(1);
            }
            return stat_file(datastore_str, '/file1');
-      
+
       }, (error) => {console.log("stat dir /dir1/dir2 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
@@ -447,7 +451,7 @@ else if( command == 'unittest' ) {
               process.exit(1);
            }
            return stat_file(datastore_str, '/dir1/file2');
-      
+
       }, (error) => {console.log("stat file /file1 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
@@ -456,7 +460,7 @@ else if( command == 'unittest' ) {
               process.exit(1);
            }
            return stat_file(datastore_str, '/dir1/dir2/file3');
-      
+
       }, (error) => {console.log("stat file /dir1/file2 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
@@ -465,7 +469,7 @@ else if( command == 'unittest' ) {
               process.exit(1);
            }
            return file_expect(datastore_str, '/file1', 'hello world');
-      
+
       }, (error) => {console.log("stat file /dir1/dir2/file3 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
@@ -474,7 +478,7 @@ else if( command == 'unittest' ) {
               process.exit(1);
            }
            return file_expect(datastore_str, '/dir1/file2', 'hello world 2');
-      
+
       }, (error) => {console.log("get file /file1 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
@@ -483,7 +487,7 @@ else if( command == 'unittest' ) {
               process.exit(1);
            }
            return file_expect(datastore_str, '/dir1/dir2/file3', 'hello world 3');
-      
+
       }, (error) => {console.log("get file /dir1/file2 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
@@ -519,7 +523,7 @@ else if( command == 'unittest' ) {
               process.exit(1);
            }
            return stat_file(datastore_str, '/file1', true);
-      
+
       }, (error) => {console.log("delete file /dir1/dir2/file3 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
@@ -528,7 +532,7 @@ else if( command == 'unittest' ) {
               process.exit(1);
            }
            return stat_file(datastore_str, '/dir1/file2', true);
-      
+
       }, (error) => {console.log("stat /file1 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
@@ -537,7 +541,7 @@ else if( command == 'unittest' ) {
               process.exit(1);
            }
            return stat_file(datastore_str, '/dir1/dir2/file3', true);
-      
+
       }, (error) => {console.log("stat file /dir1/file2 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
@@ -546,7 +550,7 @@ else if( command == 'unittest' ) {
               process.exit(1);
            }
            return file_absent(datastore_str, '/file1');
-      
+
       }, (error) => {console.log("stat file /dir1/dir2/file3 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
@@ -555,7 +559,7 @@ else if( command == 'unittest' ) {
               process.exit(1);
            }
            return file_absent(datastore_str, '/dir1/file2');
-      
+
       }, (error) => {console.log("getFile /dir1/file2 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
@@ -564,7 +568,7 @@ else if( command == 'unittest' ) {
               process.exit(1);
            }
            return file_absent(datastore_str, '/dir1/dir2/file3', true);
-      
+
       }, (error) => {console.log("getFile /dir1/file2 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
@@ -624,7 +628,7 @@ else if( command == 'unittest' ) {
               process.exit(1);
            }
            return stat_dir(datastore_str, '/dir1/dir2', true);
-      
+
       }, (error) => {console.log("stat dir /dir1 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
@@ -632,7 +636,7 @@ else if( command == 'unittest' ) {
            if( !res || res.error ) {
               process.exit(1);
            }
-            
+
            return deleteDatastore(datastore_str);
       }, (error) => {console.log("stat dir /dir1/dir2 failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
