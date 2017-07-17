@@ -701,10 +701,6 @@ function getSessionToken() {
 }
 
 
-   return getBlockchainIDFromSessionOrDefault(session);
-}
-
-
 /*
  * Fulfill a replication strategy using the drivers available to us.
  *
