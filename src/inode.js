@@ -22,15 +22,20 @@ const BLOCKSTACK_STORAGE_PROTO_VERSION = 1;
  * Hash an inode payload and its length.
  * Specifically hash `${payload.length}:${payload},`
  *
- * @param payload_buffer (Buffer) the buffer to hash
+ * @param payload_buffer (String) the payload to hash
  *
  * Return the sha256
  */
 export function hashDataPayload( payload_buffer ) {
    const hash = crypto.createHash('sha256');
-   
-   hash.update(`${payload_buffer.length}:`);
-   hash.update(payload_buffer);
+
+   // this forces the hash to be computed over the bytestring
+   // (important when computing length!) which will make it
+   // match with the Python hash verifier
+   const payload_str = Buffer.from(payload_buffer);
+
+   hash.update(`${payload_str.length}:`);
+   hash.update(payload_str);
    hash.update(',');
 
    return hash.digest('hex');
