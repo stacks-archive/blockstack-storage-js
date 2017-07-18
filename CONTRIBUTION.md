@@ -246,13 +246,22 @@ Run `npm run dev` before committing to ensure your changes follow our coding sta
   <tbody>
     <tr>
       <td align="center" valign="top">
-        <img width="150" height="150" src="https://github.com/larrysalibra.png?s=150">
+        <img width="150" height="150" src="https://github.com/jcnelson.png?s=150">
         <br>
-        <a href="https://github.com/larrysalibra">Guy Lepage</a>
+        <a href="https://github.com/jcnelson">Jude Nelson</a>
         <br>
         <p>master branch</p>
       </td>
-     </tr>
+    </tr>
+    <tr>
+      <td align="center" valign="top">
+        <img width="150" height="150" src="https://github.com/larrysalibra.png?s=150">
+        <br>
+        <a href="https://github.com/larrysalibra">Larry Salibra</a>
+        <br>
+        <p>master branch</p>
+      </td>
+    </tr>
   </tbody>
 </table>
 
