@@ -64,8 +64,10 @@ Our bug tracker utilizes several labels to help organize and identify issues. He
 - `documentation` - Issue that is specifically for addition, creation or editing of documentation
 - `duplicate` - Issues that have already been opened once already
 - `enhancement` - Issues that enhance the product
+- `feature-request` - Issue whenever a new feature is suggested
 - `help wanted` - Issues that require assistance
 - `question` - Issues for general questions about blockstack
+- `versions (vX.X.X)` - Issues that are a part of a specific release
 - `wont-fix` - Issues that wont-fix
 
 For a complete look at our labels, see the [project labels page](https://github.com/blockstack/blockstack-storage-js/labels).
