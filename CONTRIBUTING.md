@@ -8,8 +8,6 @@ Following these guidelines helps to communicate that you respect the time of eve
 
 ## Table of contents
 
-- [Open Source Design & design process](https://github.com/blockstack/designs/issues/267)
-- [BlockstackDS (Design System) › Visit the repository](https://github.com/blockstack/design-system/issues/3)
 - [Finding opportunities to contribute](#finding-opportunities-to-contribute)
 - [Using the issue tracker](#using-the-issue-tracker)
 - [Bug reports](#bug-reports)
