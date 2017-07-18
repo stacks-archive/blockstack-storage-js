@@ -78,7 +78,7 @@ A bug is a _demonstrable problem_ that is caused by the code in the repository. 
 
 Guidelines for bug reports:
 
-0. **Validate and lint your code** &mdash; [validate your HTML](https://html5.validator.nu) and [lint your HTML](https://github.com/twbs/bootlint) to ensure your problem isn't caused by a simple error in your own code.
+0. **Validate and lint your code** &mdash;
 
 1. **Use the GitHub issue search** &mdash; [Search for duplicate or closed issues](https://github.com/blockstack/blockstack-storage-js/issues?utf8=%E2%9C%93&q=is%3Aissue).
 
@@ -213,12 +213,6 @@ includes code changes) and under the terms of the
 [^ Back To The Top](#contributing-to-blockstack-storage-js)
 
 ## Code guidelines
-
-### HTML
-
-[Adhere to the Code Guide.](http://codeguide.co/#html)
-
-- Use tags and elements appropriate for an HTML5 doctype (e.g., self-closing tags).
 
 ### JS
 
