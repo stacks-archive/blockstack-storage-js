@@ -252,8 +252,6 @@ Run `npm run dev` before committing to ensure your changes follow our coding sta
         <br>
         <p>master branch</p>
       </td>
-    </tr>
-    <tr>
       <td align="center" valign="top">
         <img width="150" height="150" src="https://github.com/larrysalibra.png?s=150">
         <br>
