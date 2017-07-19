@@ -573,6 +573,7 @@ export function datastoreMount(opts) {
       'path': `/v1/stores/${datastore_id}?device_ids=${device_id}&blockchain_id=${blockchain_id}`,
    }
 
+   console.log(`Mount datastore ${options.path}`);
    options['headers'] = {'Authorization': `bearer ${sessionToken}`};
 
    return httpRequest(options, DATASTORE_RESPONSE_SCHEMA).then((ds) => {
@@ -962,7 +963,6 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
 /*
  * Path lookup
  *
- * @param ds (Object) a datastore context
  * @param path (String) the path to the inode
  * @param opts (Object) optional arguments:
  *      .extended (Bool) whether or not to include the entire path's inode information
@@ -1032,7 +1032,6 @@ export function lookup(path, opts={}) {
 /*
  * List a directory.
  *
- * @param ds (Object) a datastore context
  * @param path (String) the path to the directory to list
  * @param opts (Object) optional arguments:
  *      .extended (Bool) whether or not to include the entire path's inode inforamtion
@@ -1098,7 +1097,6 @@ export function listdir(path, opts={}) {
 /*
  * Stat a file or directory (i.e. get the inode header)
  *
- * @param ds (Object) a datastore context
  * @param path (String) the path to the directory to list
  * @param opts (Object) optional arguments:
  *      .extended (Bool) whether or not to include the entire path's inode inforamtion
@@ -1166,7 +1164,6 @@ export function stat(path, opts={}) {
  * Get an undifferentiated file or directory and its data.
  * Low-level method, not meant for external consumption.
  *
- * @param ds (Object) a datastore context
  * @param path (String) the path to the directory to list
  * @param opts (Object) optional arguments:
  *      .extended (Bool) whether or not to include the entire path's inode inforamtion
@@ -1248,7 +1245,6 @@ function getInode(path, opts={}) {
 /*
  * Get a file.
  *
- * @param ds (Object) a datastore context
  * @param path (String) the path to the file to read
  * @param opts (Object) optional arguments:
  *      .extended (Bool) whether or not to include the entire path's inode inforamtion
@@ -1416,7 +1412,6 @@ function datastoreOperation(ds, operation, path, inodes, payloads, signatures, t
  * Given a path, get its parent directory
  * Make sure it's a directory.
  *
- * @param ds (Object) a datastore context
  * @param path (String) the path to the inode in question
  * @param opts (Object) lookup options
  *      .extended (Bool) whether or not to include the entire path's inode inforamtion
@@ -1453,7 +1448,6 @@ function getParent(path, opts={}) {
 /*
  * Create or update a file
  *
- * @param ds (Object) a datastore context
  * @param path (String) the path to the file to create (must not exist)
  * @param file_buffer (Buffer or String) the file contents
  * @param opts (Object) lookup options
@@ -1546,7 +1540,6 @@ export function putFile(path, file_buffer, opts={}) {
 /*
  * Create a directory.
  *
- * @param ds (Object) datastore context
  * @param path (String) path to the directory
  * @param opts (object) optional arguments
  *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
@@ -1599,7 +1592,6 @@ export function mkdir(path, opts={}) {
 /*
  * Delete a file
  *
- * @param ds (Object) datastore context
  * @param path (String) path to the directory
  * @param opts (Object) options for this call
  *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
@@ -1654,7 +1646,6 @@ export function deleteFile(path, opts={}) {
 /*
  * Remove a directory
  *
- * @param ds (Object) datastore context
  * @param path (String) path to the directory
  * @param opts (Object) options for this call
  *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
