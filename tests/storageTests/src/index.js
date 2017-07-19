@@ -12,6 +12,7 @@ import {
    datastoreRmdir,
    datastoreListdir,
    datastoreGetFile,
+   datastoreGetFileURL,
    datastorePutFile,
    datastoreDeleteFile,
    datastoreStat,
@@ -39,6 +40,7 @@ const jsontokens = require('jsontokens');
 const BigInteger = require('bigi');
 const Promise = require('promise');
 const uuid = require('uuid');
+const URL = require('url');
 
 var args = process.argv.slice(2);
 var command = null;
@@ -147,7 +149,6 @@ function file_expect(ds_str, file_path, content) {
         if( idata != content ) {
            console.log(`expected ${content}; got ${idata}`);
         }
-
         return true;
    },
    (error) => {
@@ -155,6 +156,54 @@ function file_expect(ds_str, file_path, content) {
         console.log(error);
         console.log(JSON.stringify(error));
         return false;
+   })
+   .then((res) => {
+      if (!res) {
+         return false;
+      }
+
+      // test getFileURL
+      return datastoreGetFileURL(ds_str, file_path);
+   })
+   .then((fileURL) => {
+
+      console.log(`getFileURL ${file_path} got result: ${fileURL}`);
+
+      // parse it
+      let urlinfo = URL.parse(fileURL);
+      let host = urlinfo.hostname;
+      let port = urlinfo.port;
+      let path = urlinfo.path;
+      
+      const options = {
+         'method': 'GET',
+         'host': host,
+         'port': port,
+         'path': path, 
+      };
+
+      return fetch(fileURL, options);
+   })
+   .then((response) => {
+      if (response.status != 200) {
+         throw new Error(`Got HTTP ${response.status} from ${fileURL}`);
+      }
+      
+      return response.text();
+   })
+   .then((text) => {
+      if (text !== content) {
+         console.log(`expected: ${content}`);
+         console.log(`got: ${text}`);
+          throw new Error("Invalid text");
+      }
+
+      return true
+   })
+   .catch((error) => {
+      console.log(error);
+      console.log(JSON.stringify(error));
+      return false;
    });
 }
 

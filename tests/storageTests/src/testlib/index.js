@@ -59,6 +59,25 @@ export function datastoreGetFile(ds_str, path, extended, force) {
 }
 
 
+// getfileurl 
+export function datastoreGetFileURL(ds_str, path, extended, force) {
+
+   // ds will be JSON string 
+   var ds = JSON.parse(ds_str);
+   var extended = (extended == '1');
+   var force = (force == '1');
+
+   var opts = {
+      'extended': extended,
+      'force': force,
+      'ds': ds,
+   };
+
+   console.log(`getFileURL(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
+   return datastore.getFileURL(path, opts);
+}
+
+
 // putfile 
 export function datastorePutFile(ds_str, path, data_str, extended, force) {
 
