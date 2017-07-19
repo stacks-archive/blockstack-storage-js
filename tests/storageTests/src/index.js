@@ -38,6 +38,7 @@ const http = require('http');
 const jsontokens = require('jsontokens');
 const BigInteger = require('bigi');
 const Promise = require('promise');
+const uuid = require('uuid');
 
 var args = process.argv.slice(2);
 var command = null;
@@ -219,72 +220,43 @@ function node_ping(host, port) {
    return http_request(options);
 }
 
+/*
+ * Run all unit tests.
+ * Returns a Promise onto which more tests can be tacked on.
+ */
+function do_unit_tests( blockchain_id ) {
 
-if( command == 'createDatastore' ) {
-   assert(args.length >= 5);
-   res = createDatastore(args[1], args[2], args[3], args[4], args[5])
-}
-else if( command == 'deleteDatastore') {
-   assert(args.length >= 2);
-   res = deleteDatastore(args[1]);
-}
-else if( command == 'getDatastore') {
-   assert(args.length >= 5);
-   res = getDatastore(args[1], args[2], args[3], args[4]);
-}
-else if( command == 'mkdir' ) {
-   assert(args.length >= 3);
-   res = datastoreMkdir(args[1], args[2], args[3], args[4]);
-}
-else if( command == 'rmdir' ) {
-   assert(args.length >= 3);
-   res = datastoreRmdir(args[1], args[2], args[3], args[4]);
-}
-else if( command == 'listdir' ) {
-   assert(args.length >= 3 );
-   res = datastoreListdir(args[1], args[2], args[3], args[4]);
-}
-else if( command == 'getfile' ) {
-   assert(args.length >= 3);
-   res = datastoreGetFile(args[1], args[2], args[3], args[4]);
-}
-else if( command == 'putfile' ) {
-   assert(args.length >= 4);
-   res = datastorePutFile(args[1], args[2], args[3], args[4], args[5]);
-}
-else if( command == 'deletefile' ) {
-   assert(args.length >= 3);
-   res = datastoreDeleteFile(args[1], args[2]);
-}
-else if( command == 'stat' ) {
-   assert(args.length >= 3 );
-   res = datastoreStat(args[1], args[2]);
-}
-else if( command == 'unittest' ) {
+   // test making an inode header blob...
    var hdr = makeInodeHeaderBlob("1BjnYXfXbh84Xrc24zM1GFvCrXenp8AqUZ", 2, "1BjnYXfXbh84Xrc24zM1GFvCrXenp8AqUZ", "86ce29a7-0714-4136-bfbc-d48f2e55afd4", "9ceb6a079746a67defdadd7ad19a4c9e070a7e5dd2d41df9fc6e3d289e8e49c4", "c429b777-c7b9-4e07-99ba-7cdf98a283c3", 1);
 
    var api_password = "blockstack_integration_test_api_password";
-   var device_id = 'c429b777-c7b9-4e07-99ba-7cdf98a283c3';
+   var test_host = 'localhost';
+   var test_port = 16268;
+   var device_id = "0"; // uuid.v4();
    var datastore_privkey = bitcoinjs.ECPair.makeRandom();
    var datastore_privkey_hex = datastore_privkey.d.toBuffer().toString('hex');
    var datastore_pubkey_hex = datastore_privkey.getPublicKeyBuffer().toString('hex');
+
+   // TODO: this isn't the actual datastore ID in the multi-player configuration
    var datastore_id = datastoreGetId(datastore_pubkey_hex);
    var res = null;
    var datastore = null;
    var datastore_str = null;
    var session_token = null;
+   
+   localStorage.removeItem("blockstack");
 
    console.log(`private key is ${datastore_privkey_hex}`);
    console.log(`public key is ${datastore_pubkey_hex}`);
    console.log("begin ping");
 
-   node_ping('localhost', 16268)
+   return node_ping(test_host, test_port)
       .then((res) => {
 
            console.log(`ping result: ${JSON.stringify(res)}`);
 
            var auth_request = makeAuthRequest(datastore_privkey_hex, "https://www.foo.com/login", "https://www.foo.com/manifest.json", ['store_read', 'store_write', 'store_admin'], "https://www.foo.com");
-           return getCoreSession('localhost', 16268, api_password, datastore_privkey_hex, "judecn.id", auth_request);
+           return getCoreSession(test_host, test_port, api_password, datastore_privkey_hex, blockchain_id, auth_request);
 
       }, (error) => {console.log(JSON.stringify(error)); process.exit(1);})
       .then((token_res) => {
@@ -645,8 +617,62 @@ else if( command == 'unittest' ) {
            if( !res ) {
               process.exit(1);
            }
-           process.exit(0);
       }, (error) => {console.log("delete datastore failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);});
+}
+
+if( command == 'createDatastore' ) {
+   assert(args.length >= 5);
+   res = createDatastore(args[1], args[2], args[3], args[4], args[5])
+}
+else if( command == 'deleteDatastore') {
+   assert(args.length >= 2);
+   res = deleteDatastore(args[1]);
+}
+else if( command == 'getDatastore') {
+   assert(args.length >= 5);
+   res = getDatastore(args[1], args[2], args[3], args[4]);
+}
+else if( command == 'mkdir' ) {
+   assert(args.length >= 3);
+   res = datastoreMkdir(args[1], args[2], args[3], args[4]);
+}
+else if( command == 'rmdir' ) {
+   assert(args.length >= 3);
+   res = datastoreRmdir(args[1], args[2], args[3], args[4]);
+}
+else if( command == 'listdir' ) {
+   assert(args.length >= 3 );
+   res = datastoreListdir(args[1], args[2], args[3], args[4]);
+}
+else if( command == 'getfile' ) {
+   assert(args.length >= 3);
+   res = datastoreGetFile(args[1], args[2], args[3], args[4]);
+}
+else if( command == 'putfile' ) {
+   assert(args.length >= 4);
+   res = datastorePutFile(args[1], args[2], args[3], args[4], args[5]);
+}
+else if( command == 'deletefile' ) {
+   assert(args.length >= 3);
+   res = datastoreDeleteFile(args[1], args[2]);
+}
+else if( command == 'stat' ) {
+   assert(args.length >= 3 );
+   res = datastoreStat(args[1], args[2]);
+}
+else if( command == 'unittest' ) {
+   do_unit_tests(null)
+   .then((result) => {
+      return do_unit_tests("judecn.id");
+   })
+   .then((result) => {
+      process.exit(0);
+   })
+   .catch((error) => {
+      console.log(error);
+      console.log(JSON.stringify(error));
+      process.exit(1);
+   });
 }
 else {
    console.log("No command given");
