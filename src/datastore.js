@@ -550,9 +550,11 @@ export function datastoreMount(opts) {
    }
 
    const blockstack_hostport = api_endpoint.split('://').reverse()[0];
+   const scheme = api_endpoint.split('://')[0] == 'https' ? 'https': 'http';
    const hostinfo = splitHostPort(blockstack_hostport);
 
    const ctx = {
+      'scheme': scheme,
       'host': hostinfo.host,
       'port': hostinfo.port,
       'blockchain_id': blockchain_id,
@@ -1238,6 +1240,43 @@ function getInode(path, opts={}) {
             return response;
          }
       });
+   });
+}
+
+
+/*
+ * Get the URL to a file.  A caller can fetch() from it.
+ *
+ * @param path (String) the path to the file to read
+ * @param opts (Object) optional arguments:
+ *      .extended (Bool) whether or not to include the entire path's inode inforamtion
+ *      .force (Bool) if True, then ignore stale inode errors.
+ *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
+ *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
+ *
+ * Asynchronous; returns a Promise that resolves to the URL.
+ */
+export function getFileURL(path, opts={}) {
+
+   let blockchain_id = opts.blockchainID;
+
+   if (!blockchain_id) {
+      blockchain_id = getSessionBlockchainID();
+   }
+   
+   return datastoreMount({'blockchainID': blockchain_id})
+   .then((ds) => {
+      assert(ds);
+
+      const scheme = ds.scheme;
+      const host = ds.host;
+      const port = ds.port;
+      const datastore_id = ds.datastore_id;
+      const device_list = getDeviceList(ds);
+      const device_pubkeys = getPublicKeyList(ds);
+      const urlpath = `/v1/stores/${datastore_id}/files?path=${escape(sanitizePath(path))}&idata=1&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${blockchain_id}`;
+
+      return `${scheme}://${host}:${port}${urlpath}`;
    });
 }
 
