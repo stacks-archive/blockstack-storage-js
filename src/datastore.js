@@ -517,6 +517,8 @@ export function datastoreMount(opts) {
 
        const session = jsontokens.decodeToken(sessionToken).payload;
 
+       // TODO: can't get datastore_id from data_privkey_hex; we should pass it in as part of the session
+       // in order to handle the multi-device case.
        device_id = session.device_id;
        api_endpoint = session.api_endpoint;
        app_public_keys = session.app_public_keys;
