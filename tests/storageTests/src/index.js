@@ -133,6 +133,9 @@ function stat_file(ds_str, file_path, expect_error) {
 
 
 function file_expect(ds_str, file_path, content) {
+   let options = null;
+   let fileURL = null;
+
    return datastoreGetFile(ds_str, file_path).then(
    (idata) => {
         console.log(`getfile ${file_path} got result: ${JSON.stringify(idata)}`);
@@ -165,17 +168,18 @@ function file_expect(ds_str, file_path, content) {
       // test getFileURL
       return datastoreGetFileURL(ds_str, file_path);
    })
-   .then((fileURL) => {
+   .then((fileurl) => {
+      fileURL = fileurl;
 
       console.log(`getFileURL ${file_path} got result: ${fileURL}`);
-
+      
       // parse it
       let urlinfo = URL.parse(fileURL);
       let host = urlinfo.hostname;
       let port = urlinfo.port;
       let path = urlinfo.path;
       
-      const options = {
+      options = {
          'method': 'GET',
          'host': host,
          'port': port,
@@ -195,10 +199,73 @@ function file_expect(ds_str, file_path, content) {
       if (text !== content) {
          console.log(`expected: ${content}`);
          console.log(`got: ${text}`);
-          throw new Error("Invalid text");
+         throw new Error("Invalid text");
       }
 
-      return true
+      // test range (lower bound)
+      options['headers'] = {
+         'range': `bytes=0-${parseInt(parseInt(content.length/2))}`
+      };
+
+      return fetch(fileURL, options);
+   })
+   .then((response) => {
+      if (response.status != 206) {
+         throw new Error(`Got HTTP ${response.status} from ${fileURL}`);
+      }
+
+      return response.text();
+   })
+   .then((text) => {
+      if (text !== content.slice(0,parseInt(content.length/2)+1)) {
+         console.log(`expected: ${content.slice(0,parseInt(content.length/2)+1)}`);
+         console.log(`got: ${text}`);
+         throw new Error("Invalid text (lower half)");
+      }
+
+      // test range (upper bound)
+      options['headers'] = {
+         'range': `bytes=${parseInt(content.length/2)}-${content.length}`
+      };
+
+      return fetch(fileURL, options);
+   })
+   .then((response) => {
+      if (response.status != 206) {
+         throw new Error(`Got HTTP ${response.status} from ${fileURL}`);
+      }
+
+      return response.text();
+   })
+   .then((text) => {
+      if (text !== content.slice(parseInt(content.length/2),content.length)) {
+         console.log(`expected: ${content.slice(parseInt(content.length/2), content.length)}`);
+         console.log(`got: ${text}`);
+         throw new Error("Invalid text (upper half)");
+      }
+
+      // text overflow range 
+      options['headers'] = {
+         'range': `bytes=${content.length}-${content.length+1}`
+      };
+
+      return fetch(fileURL, options);
+   })
+   .then((response) => {
+      if (response.status != 206) {
+         throw new Error(`Got HTTP ${response.status} from ${fileURL}`);
+      }
+
+      return response.text();
+   })
+   .then((text) => {
+      if (text !== "") {
+         console.log("expected: ''");
+         console.log(`got: ${text}`);
+         throw new Error("Invalid text (overflow)");
+      }
+
+      return true;
    })
    .catch((error) => {
       console.log(error);
