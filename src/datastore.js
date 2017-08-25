@@ -628,6 +628,20 @@ function getUserData() {
  * Save local storage
  */
 function setUserData(userData) {
+
+   let u = getUserData();
+   if (u.coreSessionToken && userData.coreSessionToken) {
+      // only store the newer one 
+      let coreSessionToken = null;
+      if (u.coreSessionToken.timestamp < userData.coreSessionToken) {
+         coreSessionToken = userData.coreSessionToken;
+      }
+      else {
+         coreSessionToken = u.coreSessionToken;
+      }
+      userData.coreSessionToken = coreSessionToken;
+   }
+   
    localStorage.setItem(LOCAL_STORAGE_ID, JSON.stringify(userData));
 }
 
