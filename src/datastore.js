@@ -653,10 +653,21 @@ function getUserData() {
  */
 function setUserData(userData) {
 
-   const localStorage = getLocalStorage();
+   let u = getUserData();
+   if (u.coreSessionToken && userData.coreSessionToken) {
+      // only store the newer one 
+      let coreSessionToken = null;
+      if (u.coreSessionToken.timestamp < userData.coreSessionToken.timestamp) {
+         coreSessionToken = userData.coreSessionToken;
+      }
+      else {
+         coreSessionToken = u.coreSessionToken;
+      }
+      userData.coreSessionToken = coreSessionToken;
+   }
+   
    localStorage.setItem(LOCAL_STORAGE_ID, JSON.stringify(userData));
 }
-
 
 /*
  * Get a cached app-specific datastore mount context for a given blockchain ID and application
