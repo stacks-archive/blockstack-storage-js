@@ -199,6 +199,9 @@ export const MUTABLE_DATUM_RESPONSE_SCHEMA = {
    ],
 };
 
+export const MUTABLE_DATUM_EXTENDED_RESPONSE_SCHEMA = Object.assign({}, MUTABLE_DATUM_RESPONSE_SCHEMA);
+MUTABLE_DATUM_EXTENDED_RESPONSE_SCHEMA['path_info'] = MUTABLE_DATUM_PATH_INFO_SCHEMA;
+
 export const DATASTORE_SCHEMA = {
     type: 'object',
     properties: {
@@ -321,6 +324,7 @@ export const DATASTORE_LOOKUP_RESPONSE_SCHEMA = {
             type: 'boolean',
         },
     },
+    additionalProperties: false,
     required: ['inode', 'status'],
 };
 
@@ -333,12 +337,14 @@ export const DATASTORE_LOOKUP_EXTENDED_RESPONSE_SCHEMA = {
             patternProperties: {
                 OP_URLENCODED_OR_EMPTY_PATTERN: DATASTORE_LOOKUP_INODE_SCHEMA,
             },
+            additionalProperties: false,
         },
         inode_info: DATASTORE_LOOKUP_INODE_SCHEMA,
         status: {
             type: 'boolean',
         },
     },
+    additionalProperties: false,
     required: [
        'path_info',
        'inode_info',
