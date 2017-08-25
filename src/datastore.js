@@ -480,6 +480,7 @@ export function datastoreDelete(ds=null, ds_tombstones=null, root_tombstones=nul
 export function datastoreMount(opts) {
 
    let data_privkey_hex = opts.appPrivateKey;
+   const app_name = opts.appName;
    const no_cache = opts.noCachedMounts;
 
    let sessionToken = opts.sessionToken;
@@ -492,12 +493,12 @@ export function datastoreMount(opts) {
 
    // maybe cached?
    if (blockchain_id && !no_cache) {
-       let ds = getCachedMountContext(blockchain_id);
+       let ds = getCachedMountContext(session_blockchain_id);
        if (ds) {
           return new Promise((resolve, reject) => { resolve(ds); });
        }
    }
-   
+    
    if (!blockchain_id || blockchain_id === session_blockchain_id) {
 
        // assume the one in this session
@@ -510,10 +511,11 @@ export function datastoreMount(opts) {
        }
 
        if (!blockchain_id){
-          blockchain_id = getSessionBlockchainID(sessionToken);
+          blockchain_id = getSessionBlockchainID();
        }
 
-       assert(blockchain_id);
+      assert(blockchain_id);
+      assert(app_name);
 
        const session = jsontokens.decodeToken(sessionToken).payload;
 
@@ -615,7 +617,7 @@ export function datastoreMount(opts) {
  */
 function getUserData() {
    let userData = localStorage.getItem(LOCAL_STORAGE_ID);
-   if (userData === null || typeof(userData) === 'undefined') {
+   if (userData === null) {
       userData = '{}';
    }
 
@@ -700,33 +702,16 @@ function getBlockchainIDFromSessionOrDefault(session) {
    }
 }
 
-
 /*
- * Get the session token from localstorage
+ * Get the current encoded session token
  */
 function getSessionToken() {
-    let userData = getUserData();
-    assert(userData);
-    assert(userData.coreSessionToken);
 
-    let sessionToken = userData.coreSessionToken;
-    return sessionToken;
-}
+   let userData = getUserData();
+   assert(userData);
+   assert(userData.coreSessionToken);
 
-
-/*
- * Get the current session's blockchain ID
- * Throw if not defined or not present.
- */
-function getSessionBlockchainID(sessionToken=null) {
-
-   if (!sessionToken) {
-      sessionToken = getSessionToken();
-   }
-
-   const session = jsontokens.decodeToken(sessionToken).payload;
-
-   return getBlockchainIDFromSessionOrDefault(session);
+   return userData.coreSessionToken;
 }
 
 
