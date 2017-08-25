@@ -16,3 +16,5 @@ We suggest using the [git-flow-avh](https://github.com/petervanderdoes/gitflow-a
 
 Please send pull requests against `develop`. `master` will reflect the latest production
 code deployed to npm.
+
+Please Follow our [Contribution Guidelines](CONTRIBUTING.md) for more details on contributing to Blockstack Storage JS.
