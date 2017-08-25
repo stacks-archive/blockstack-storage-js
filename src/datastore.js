@@ -633,7 +633,7 @@ function setUserData(userData) {
    if (u.coreSessionToken && userData.coreSessionToken) {
       // only store the newer one 
       let coreSessionToken = null;
-      if (u.coreSessionToken.timestamp < userData.coreSessionToken) {
+      if (u.coreSessionToken.timestamp < userData.coreSessionToken.timestamp) {
          coreSessionToken = userData.coreSessionToken;
       }
       else {
