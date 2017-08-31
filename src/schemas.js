@@ -1,8 +1,5 @@
 'use strict'
 
-export const MUTABLE_DATUM_FILE_TYPE = 1;
-export const MUTABLE_DATUM_DIR_TYPE = 2;
-
 export const OP_BASE58CHECK_PATTERN = "^([123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+)$";
 export const OP_ADDRESS_PATTERN = OP_BASE58CHECK_PATTERN;
 export const OP_UUID_PATTERN = "^([0-9a-fA-F\-]+)$";
@@ -12,7 +9,13 @@ export const OP_URLENCODED_PATTERN = "^([a-zA-Z0-9\-_.~%/]+)$";
 export const OP_URLENCODED_NOSLASH_OR_EMPTY_PATTERN = "^([a-zA-Z0-9\-_.~%]*)$";
 export const OP_URLENCODED_OR_EMPTY_PATTERN = "^([a-zA-Z0-9\-_.~%/]*)$";
 export const OP_PUBKEY_PATTERN = OP_HEX_PATTERN;
-export const OP_BASE64_PATTERN = "(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{4})";
+export const OP_BASE64_PATTERN_SECTION = "(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{4})";
+export const OP_BASE64_PATTERN = "^(" + OP_BASE64_PATTERN_SECTION + ")$";
+export const OP_TOMBSTONE_PATTERN = '^delete-([0-9]+):([a-zA-Z0-9\-_.~%#?&\\:/=]+)$';
+export const OP_SIGNED_TOMBSTONE_PATTERN = '^delete-([0-9]+):([a-zA-Z0-9\-_.~%#?&\\:/=]+):(' + OP_BASE64_PATTERN_SECTION + ')$'
+export const OP_DATASTORE_ID_CLASS = '[a-zA-Z0-9\-_.~%]';
+export const OP_DATASTORE_ID_PATTERN = '^(' + OP_DATASTORE_ID_CLASS + '+)$';
+export const OP_URI_TARGET_PATTERN = '^([a-z0-9+]+)://([a-zA-Z0-9\\-_.~%#?&\\\:/=]+)$'
 
 export const SUCCESS_FAIL_SCHEMA = {
    anyOf: [
@@ -35,169 +38,190 @@ export const SUCCESS_FAIL_SCHEMA = {
    ],
 };
 
+export const ROOT_DIRECTORY_LEAF = 1;
+export const ROOT_DIRECTORY_PARENT = 2;
 
-export const MUTABLE_DATUM_SCHEMA_BASE_PROPERTIES = {
-    type: {
-        type: 'integer',
-        minimum: MUTABLE_DATUM_FILE_TYPE,
-        maximum: MUTABLE_DATUM_DIR_TYPE,
-    },
-    owner: {
-        type: 'string',
-        pattern: OP_ADDRESS_PATTERN,
-    },
-    uuid: {
-        type: 'string',
-        pattern: OP_UUID_PATTERN,
-    },
-    readers: {
-        type: 'array',
-        items: {
-            type: 'string',
-            pattern: OP_ADDRESS_PATTERN,
-        },
-    },
-    reader_pubkeys: {
-        type: 'array',
-        items: {
-           type: 'string',
-           pattern: OP_HEX_PATTERN,
-        },
-    },
-    version: {
-        type: 'integer',
-    },
-    proto_version: {
-        type: 'integer',
-    },
-};
-
-export const MUTABLE_DATUM_SCHEMA_HEADER_PROPERTIES = Object.assign({}, MUTABLE_DATUM_SCHEMA_BASE_PROPERTIES);
-MUTABLE_DATUM_SCHEMA_HEADER_PROPERTIES['data_hash'] = {
-        type: 'string',
-        pattern: OP_HEX_PATTERN,
-};
-
-export const MUTABLE_DATUM_INODE_HEADER_SCHEMA = {
-    type: 'object',
-    properties: MUTABLE_DATUM_SCHEMA_HEADER_PROPERTIES,
-    additionalProperties: false,
-    required: Object.keys(MUTABLE_DATUM_SCHEMA_HEADER_PROPERTIES).filter(function (x) { return x != 'reader_pubkeys';}),  // reader_pubkeys is optional
-};
-
-export const MUTABLE_DATUM_DIRENT_SCHEMA = {
+export const ROOT_DIRECTORY_ENTRY_SCHEMA = {
     type: 'object',
     properties: {
-        type: {
-            type: 'integer',
-            minimum: MUTABLE_DATUM_FILE_TYPE,
-            maximum: MUTABLE_DATUM_DIR_TYPE,
+        proto_version:  {
+            type:  'integer',
+            minimum:  1,
         },
-        uuid: {
-            type: 'string',
-            pattern: OP_UUID_PATTERN,
+        urls:  {
+            type:  'array',
+            values:  {
+                type:  'string',
+                pattern:  OP_URI_TARGET_PATTERN,
+            },
         },
-        version: {
-            type: 'integer',
-        }
+        data_hash:  {
+            type:  'string',
+            pattern:  OP_HEX_PATTERN,
+        },
+        timestamp:  {
+            type:  'integer',
+            minimum:  1,
+        },
     },
-    additionalProperties: false,
-    required: [
-       'type',
-       'uuid',
-       'version',
+    additionalProperties:  false,
+    required:  [
+        'proto_version',
+        'urls',
+        'data_hash'
     ],
 };
 
-export const MUTABLE_DATUM_DIR_IDATA_SCHEMA = {
-    type: 'object',
-    properties: {
-       children: {
-            type: 'object',
-            patternProperties: {
-                OP_URLENCODED_NOSLASH_PATTERN: MUTABLE_DATUM_DIRENT_SCHEMA,
+export const ROOT_DIRECTORY_SCHEMA = {
+    type:  'object',
+    properties:  {
+        proto_version:  {
+            type:  'integer',
+            minimum:  2,
+        },
+        type:  {
+            type:  'integer',
+            minimum:  ROOT_DIRECTORY_LEAF,
+            maximum:  ROOT_DIRECTORY_PARENT,
+        },
+        owner:  {
+            type:  'string',
+            pattern:  OP_ADDRESS_PATTERN
+        },
+        readers:  {
+            type:  'array',
+            items:  {
+                type:  'string',
+                pattern:  OP_ADDRESS_PATTERN
             },
-       },
-       header: MUTABLE_DATUM_INODE_HEADER_SCHEMA
+        },
+        timestamp:  {
+            type:  'integer',
+            minimum:  1
+        },
+        files:  {
+            type:  'object',
+            patternProperties:  {
+                OP_URLENCODED_PATTERN: ROOT_DIRECTORY_ENTRY_SCHEMA
+            },
+        },
+        tombstones:  {
+            type:  'object',
+            patternProperties:  {
+                OP_URLENCODED_PATTERN: {
+                    type:  'string',
+                    pattern:  OP_TOMBSTONE_PATTERN,
+                },
+            },
+        },
     },
-    strict: true,
-    required: ['children', 'header']
-};
+    required:  [
+        'type',
+        'owner',
+        'readers',
+        'timestamp',
+        'proto_version',
+        'files',
+        'tombstones'
+    ],
+}
 
-export const MUTABLE_DATUM_FILE_SCHEMA_PROPERTIES = Object.assign({}, MUTABLE_DATUM_SCHEMA_BASE_PROPERTIES);
-MUTABLE_DATUM_FILE_SCHEMA_PROPERTIES['idata'] = {
-    type: 'string',
-    pattern: OP_BASE64_PATTERN, 
-};
-
-export const MUTABLE_DATUM_DIR_SCHEMA_PROPERTIES = Object.assign({}, MUTABLE_DATUM_SCHEMA_BASE_PROPERTIES);
-MUTABLE_DATUM_DIR_SCHEMA_PROPERTIES['idata'] = Object.assign({}, MUTABLE_DATUM_DIR_IDATA_SCHEMA);
-
-export const MUTABLE_DATUM_FILE_SCHEMA = {
-    type: 'object',
-    properties: MUTABLE_DATUM_FILE_SCHEMA_PROPERTIES,
-    additionalProperties: false,
-    required: Object.keys(MUTABLE_DATUM_FILE_SCHEMA_PROPERTIES).filter(function (x) { return x != 'reader_pubkeys';}), // reader_pubkeys is optional
-};
-
-export const MUTABLE_DATUM_DIR_SCHEMA = {
-    type: 'object',
-    properties: MUTABLE_DATUM_DIR_SCHEMA_PROPERTIES,
-    additionalProperties: false,
-    required: Object.keys(MUTABLE_DATUM_DIR_SCHEMA_PROPERTIES),
-};
-
-export const MUTABLE_DATUM_INODE_SCHEMA = {
-   anyOf: [
-      Object.assign({}, MUTABLE_DATUM_FILE_SCHEMA),
-      Object.assign({}, MUTABLE_DATUM_DIR_SCHEMA),
-      Object.assign({}, MUTABLE_DATUM_INODE_HEADER_SCHEMA),
-   ]
-};
-
-export const MUTABLE_DATUM_PATH_INFO_SCHEMA = {
-    type: 'object',
-    patternProperties: {
-       OP_URLENCODED_PATTERN: {
-          uuid: {
-              type: 'string',
-              pattern: OP_UUID_PATTERN,
-          },
-          name: {
-              type: 'string',
-              pattern: OP_URLENCODED_NOSLASH_PATTERN,
-          },
-          parent: {
-              type: 'string',
-              pattern: OP_URLENCODED_PATTERN,
-          },
-          inode: {
-             anyOf: [
-                 MUTABLE_DATUM_DIR_SCHEMA,
-                 MUTABLE_DATUM_FILE_SCHEMA,
-                 MUTABLE_DATUM_INODE_HEADER_SCHEMA,
-              ],
-          },
-       },
+export const FILE_LOOKUP_RESPONSE = {
+    type:  'object',
+    properties:  {
+        status:  {
+            type:  'boolean',
+        },
+        file_info:  ROOT_DIRECTORY_ENTRY_SCHEMA,
     },
-    additionalProperties: false,
-};
+    required:  [
+        'status',
+        'file_info'
+    ],
+}
 
-export const MUTABLE_DATUM_RESPONSE_SCHEMA = {
-   type: 'object',
-   properties: {
-      status: {
-         type: 'boolean',
-      },
-      file: MUTABLE_DATUM_FILE_SCHEMA,
-      dir: MUTABLE_DATUM_DIR_SCHEMA,
-      inode: MUTABLE_DATUM_INODE_SCHEMA,
-   },
-   additionalProperties: false,
-   required: [
-      'status'
-   ],
-};
+export const GET_DEVICE_ROOT_RESPONSE = {
+    type:  'object',
+    properties:  {
+        status:  {
+            type:  'boolean',
+        },
+        device_root_page:  ROOT_DIRECTORY_SCHEMA,
+    },
+    required:  [
+        'status',
+        'device_root_page'
+    ],
+}
+
+export const GET_ROOT_RESPONSE = {
+    type:  'object',
+    properties:  {
+        status:  {
+            type:  'boolean',
+        },
+        root:  {
+            type:  'object',
+            patternProperties:  {
+                OP_URLENCODED_PATTERN: ROOT_DIRECTORY_ENTRY_SCHEMA
+            }
+        }
+    },
+    required:  [
+        'status',
+        'root'
+    ],
+}
+
+
+export const PUT_DATASTORE_RESPONSE = {
+    type:  'object',
+    properties:  {
+        status:  {
+            type:  'boolean'
+        },
+        datastore_urls:  {
+            type:  'array',
+            items:  {
+                type:  'string',
+                pattern:  OP_URI_TARGET_PATTERN
+            },
+        },
+    },
+    required:  [
+        'status',
+        'datastore_urls',
+    ],
+}
+
+
+export const PUT_DATA_RESPONSE = {
+    type:  'object',
+    properties:  {
+        status:  {
+            type:  'boolean',
+        },
+        urls:  {
+            anyOf:  [
+                {
+                    type:  'array',
+                    items:  {
+                        type:  'string',
+                        pattern:  OP_URI_TARGET_PATTERN,
+                    },
+                },
+                {
+                    type:  'null',
+                },
+            ],
+        },
+    },
+    required:  [
+        'status', 
+        'urls'
+    ]
+}
+
 
 export const DATASTORE_SCHEMA = {
     type: 'object',
@@ -219,7 +243,7 @@ export const DATASTORE_SCHEMA = {
         device_ids: {
             type: 'array',
             items: {
-                'type': 'string',
+                type:  'string',
             },
         },
         root_uuid: {
@@ -247,104 +271,6 @@ export const DATASTORE_RESPONSE_SCHEMA = {
    required: ['datastore'],
 };
 
-export const DATASTORE_LOOKUP_PATH_ENTRY_SCHEMA = {
-    type: 'object',
-    properties: {
-        name: {
-            type: 'string',
-            pattern: OP_URLENCODED_NOSLASH_OR_EMPTY_PATTERN,
-        },
-        uuid: {
-            type: 'string',
-            pattern: OP_UUID_PATTERN,
-        },
-        parent: {
-            type: 'string',
-            pattern: OP_URLENCODED_OR_EMPTY_PATTERN,
-        },
-        inode: MUTABLE_DATUM_DIR_SCHEMA,
-    },
-    additionalProperties: false,
-    required: [
-       'name',
-       'uuid',
-       'parent',
-       'inode',
-    ],
-};
-
-
-export const DATASTORE_LOOKUP_INODE_SCHEMA = {
-    type: 'object',
-    properties: {
-        name: {
-            type: 'string',
-            pattern: OP_URLENCODED_NOSLASH_OR_EMPTY_PATTERN,
-        },
-        uuid: {
-            type: 'string',
-            pattern: OP_UUID_PATTERN,
-        },
-        parent: {
-            type: 'string',
-            pattern: OP_URLENCODED_OR_EMPTY_PATTERN,
-        },
-        inode: {
-            anyOf: [
-                MUTABLE_DATUM_DIR_SCHEMA,
-                MUTABLE_DATUM_FILE_SCHEMA,
-                MUTABLE_DATUM_INODE_HEADER_SCHEMA,
-            ],
-        },
-    },
-    additionalProperties: false,
-    required: [
-       'name',
-       'uuid',
-       'parent',
-       'inode',
-    ],
-};
-
-
-export const DATASTORE_LOOKUP_RESPONSE_SCHEMA = {
-    type: 'object',
-    properties: {
-        inode: {
-            anyOf: [
-                MUTABLE_DATUM_DIR_SCHEMA,
-                MUTABLE_DATUM_FILE_SCHEMA,
-                MUTABLE_DATUM_INODE_HEADER_SCHEMA,
-            ],
-        },
-        status: {
-            type: 'boolean',
-        },
-    },
-    required: ['inode', 'status'],
-};
-
-
-export const DATASTORE_LOOKUP_EXTENDED_RESPONSE_SCHEMA = {
-    type: 'object',
-    properties: {
-        path_info: {
-            type: 'object',
-            patternProperties: {
-                OP_URLENCODED_OR_EMPTY_PATTERN: DATASTORE_LOOKUP_INODE_SCHEMA,
-            },
-        },
-        inode_info: DATASTORE_LOOKUP_INODE_SCHEMA,
-        status: {
-            type: 'boolean',
-        },
-    },
-    required: [
-       'path_info',
-       'inode_info',
-       'status',
-    ],
-};
 
 export const CORE_ERROR_SCHEMA = {
    type: 'object',
@@ -362,3 +288,39 @@ export const CORE_ERROR_SCHEMA = {
       'error',
    ],
 };
+
+
+export const GET_PROFILE_RESPONSE = {
+    type:  'object',
+    properties:  {
+        status:  {
+            type:  'boolean',
+        },
+        profile:  {
+            anyOf:  [
+                {
+                    type:  'string',
+                },
+                {
+                    type:  'object',
+                },
+            ],
+        },
+        zonefile:  {
+            type:  'string',
+        },
+        zonefile_b64:  {
+            type:  'string',
+            pattern:  OP_BASE64_PATTERN,
+        },
+        name_record:  {
+            type:  'object',
+        },
+    },
+    required:  [
+        'status',
+        'profile',
+        'name_record',
+    ],
+}
+
