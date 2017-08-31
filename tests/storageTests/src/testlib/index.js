@@ -23,6 +23,12 @@ export function createDatastore( privkey, session, device_id, all_device_ids, dr
 }
 
 
+// get datastore 
+export function getDatastore(opts) {
+   console.log(`getDatastore(${JSON.stringify(opts)})`);
+   return datastore.datastoreMount(opts);
+}
+
 // get or create 
 export function getOrCreateDatastore( replication_strategy, session, privkey ) {
    console.log(`getOrCreateDatastore(${replication_strategy}, ${session}, ${privkey})`);
@@ -41,154 +47,64 @@ export function deleteDatastore(ds_str) {
 
 
 // getfile 
-export function datastoreGetFile(ds_str, path, extended, force) {
+export function datastoreGetFile(ds_str, path, blockchain_id) {
 
    // ds will be JSON-string 
    var ds = JSON.parse(ds_str);
-   var extended = (extended == '1');
-   var force = (force == '1');
 
    var opts = {
-      'extended': extended,
-      'force': force,
-      'ds': ds,
+      'blockchainID': blockchain_id,
    };
 
-   console.log(`getfile(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
+   console.log(`getfile(${ds.privkey_hex}, ${path}, ${blockchain_id})`);
    return datastore.getFile(path, opts);
 }
 
 
 // getfileurl 
-export function datastoreGetFileURL(ds_str, path, extended, force) {
+export function datastoreGetFileURLs(ds_str, path, blockchain_id) {
 
    // ds will be JSON string 
    var ds = JSON.parse(ds_str);
-   var extended = (extended == '1');
-   var force = (force == '1');
 
    var opts = {
-      'extended': extended,
-      'force': force,
-      'ds': ds,
+      'blockchainID': blockchain_id,
+      'app_name': 'localhost.1:8888',
    };
 
-   console.log(`getFileURL(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
+   console.log(`getFileURL(${ds.privkey_hex}, ${path}, ${blockchain_id})`);
    return datastore.getFileURL(path, opts);
 }
 
 
 // putfile 
-export function datastorePutFile(ds_str, path, data_str, extended, force) {
+export function datastorePutFile(ds_str, path, data_str) {
 
    // ds will be a json str 
    var ds = JSON.parse(ds_str);
-   var data_buf = Buffer.from(ds_str);
 
-   var extended = (extended == '1');
-   var force = (force == '1');
-
-   var opts = {
-      'extended': extended,
-      'force': force,
-      'ds': ds,
-   };
-
-   console.log(`putfile(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
-   return datastore.putFile(path, Buffer.from(data_str), opts);
+   console.log(`putfile(${ds.privkey_hex}, ${path})`);
+   return datastore.putFile(path, Buffer.from(data_str), {});
 }
 
 
 // deletefile
-export function datastoreDeleteFile(ds_str, path, extended, force) {
+export function datastoreDeleteFile(ds_str, path) {
 
    // ds will be a json str 
    var ds = JSON.parse(ds_str);
-   var extended = (extended == '1');
-   var force = (force == '1');
 
-   var opts = {
-      'extended': extended,
-      'force': force,
-      'ds': ds,
-   };
-
-   console.log(`deletefile(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
-   return datastore.deleteFile(path, opts);
-}
-
-
-// mkdir 
-export function datastoreMkdir(ds_str, path, extended, force) {
-
-   // ds will be a json str 
-   var ds = JSON.parse(ds_str);
-   var extended = (extended == '1');
-   var force = (force == '1');
-
-   var opts = {
-      'extended': extended,
-      'force': force,
-      'ds': ds,
-   };
-
-   console.log(`mkdir(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
-   return datastore.mkdir(path, opts);
-}
-
-
-// listdir 
-export function datastoreListdir(ds_str, path, extended, force) {
-
-   // ds will be a json str 
-   var ds = JSON.parse(ds_str);
-   var extended = (extended == '1');
-   var force = (force == '1');
-
-   var opts = {
-      'extended': extended,
-      'force': force,
-      'ds': ds,
-   };
-
-   console.log(`listdir(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
-   return datastore.listdir(path, opts);
-}
-
-
-// rmdir 
-export function datastoreRmdir(ds_str, path, extended, force) {
-
-   // ds will be a json str 
-   var ds = JSON.parse(ds_str);
-   var extended = (extended == '1');
-   var force = (force == '1');
-
-   var opts = {
-      'extended': extended,
-      'force': force,
-      'ds': ds,
-   };
-
-   console.log(`rmdir(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
-   return datastore.rmdir(path, opts);
+   console.log(`deletefile(${ds.privkey_hex}, ${path})`);
+   return datastore.deleteFile(path, {});
 }
 
 
 // stat
-export function datastoreStat(ds_str, path, extended, force) {
+export function datastoreStat(ds_str, path, blockchain_id) {
 
    // ds will be a json str 
    var ds = JSON.parse(ds_str);
-   var extended = (extended == '1');
-   var force = (force == '1');
 
-   var opts = {
-      'extended': extended,
-      'force': force,
-      'ds': ds,
-   };
-
-   console.log(`stat(${ds.privkey_hex}, ${path}, ${extended}, ${force})`);
-   return datastore.stat(path, opts);
+   console.log(`stat(${ds.privkey_hex}, ${path})`);
+   return datastore.getFileURLs(path, {'blockchainID': blockchain_id});
 }
