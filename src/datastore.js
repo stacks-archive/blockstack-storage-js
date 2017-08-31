@@ -1,39 +1,76 @@
-'use strict';
+'use strict'    
 
 import {
-   MUTABLE_DATUM_DIR_TYPE,
-   MUTABLE_DATUM_FILE_TYPE,
+   selectDrivers,
+   REPLICATION_STRATEGY_CLASSES,
+   SUPPORTED_STORAGE_CLASSES
+} from './policy';
+
+import {
+   httpRequest
+} from './requests';
+
+import {
+   getDeviceRoot,
+   getRoot,
+   getFileHeader,
+   getFileData,
+   putDeviceRoot,
+   putFileData,
+   deleteFileData,
+   getProfileData,
+} from './api';
+
+import {
+   SUCCESS_FAIL_SCHEMA,
+   ROOT_DIRECTORY_LEAF,
+   ROOT_DIRECTORY_PARENT,
+   ROOT_DIRECTORY_ENTRY_SCHEMA,
+   ROOT_DIRECTORY_SCHEMA,
+   FILE_LOOKUP_RESPONSE,
+   GET_DEVICE_ROOT_RESPONSE,
+   GET_ROOT_RESPONSE,
+   PUT_DATASTORE_RESPONSE,
+   PUT_DATA_RESPONSE,
    DATASTORE_SCHEMA,
    DATASTORE_RESPONSE_SCHEMA,
-   MUTABLE_DATUM_INODE_SCHEMA,
-   MUTABLE_DATUM_DIR_IDATA_SCHEMA,
-   MUTABLE_DATUM_EXTENDED_RESPONSE_SCHEMA,
-   SUCCESS_FAIL_SCHEMA,
-   DATASTORE_LOOKUP_RESPONSE_SCHEMA,
-   DATASTORE_LOOKUP_EXTENDED_RESPONSE_SCHEMA,
    CORE_ERROR_SCHEMA,
 } from './schemas';
 
+
 import {
-   makeFileInodeBlob,
-   makeDirInodeBlob,
-   makeMutableDataInfo,
+   makeDataInfo,
    signDataPayload,
    signRawData,
    hashDataPayload,
    hashRawData,
-   inodeDirLink,
-   inodeDirUnlink,
-   decodePrivateKey,
-   makeInodeTombstones,
-   makeMutableDataTombstones,
-   signMutableDataTombstones,
-   getChildVersion,
+   makeDataTombstones,
+   signDataTombstones,
+} from './blob';
+
+import {
+   makeEmptyDeviceRootDirectory,
 } from './inode';
 
 import {
-   jsonStableSerialize
+   jsonStableSerialize,
+   decodePrivateKey,
+   decompressPublicKey,
+   getPubkeyHex,
+   splitHostPort
 } from './util';
+
+
+import {
+   getSessionToken,
+   getSessionAppName,
+   getSessionBlockchainID,
+   getCachedMountContext,
+   getBlockchainIDFromSessionOrDefault,
+   getUserData,
+   setUserData,
+   setCachedMountContext,
+} from './metadata';
 
 
 const http = require('http');
@@ -44,117 +81,7 @@ const Promise = require('promise');
 const assert = require('assert');
 const Ajv = require('ajv');
 const jsontokens = require('jsontokens');
-
-const EPERM = 1;
-const ENOENT = 2;
-const EACCES = 13;
-const EEXIST = 17;
-const ENOTDIR = 20;
-const EINVAL = 22;
-const EREMOTEIO = 121;
-
-const LOCAL_STORAGE_ID = "blockstack";
-const SUPPORTED_STORAGE_CLASSES = ["read_public", "write_public", "read_private", "write_private", "read_local", "write_local"];
-const REPLICATION_STRATEGY_CLASSES = {
-   'local': new Set(['read_local', 'write_local']),
-   'publish': new Set(['read_public', 'write_private']),
-   'public': new Set(['read_public', 'write_public']),
-   'private': new Set(['read_private', 'write_private']),
-};
-
-/*
- * Helper method to validate a JSON response
- * against a schema.  Returns the validated object
- * on success, and throw an exception on error.
- */
-function validateJSONResponse(resp, result_schema) {
-
-   const ajv = new Ajv();
-   if (result_schema) {
-      try {
-         const valid = ajv.validate(result_schema, resp);
-         assert(valid);
-         return resp;
-      }
-      catch(e) {
-         try {
-            // error message
-            const valid = ajv.validate(CORE_ERROR_SCHEMA, resp);
-            assert(valid);
-            return resp;
-         }
-         catch(e2) {
-            console.log("Failed to validate with desired schema");
-            console.log(e.stack);
-            console.log("Failed to validate with error schema");
-            console.log(e2.stack);
-            console.log("Desired schema:");
-            console.log(result_schema);
-            console.log("Parsed message:");
-            console.log(resp);
-            throw new Error("Invalid core message");
-         }
-      }
-   }
-   else {
-      return resp;
-   }
-}
-
-
-/*
- * Helper method to issue an HTTP request.
- * @param options (Object) set of HTTP request options
- * @param result_schema (Object) JSON schema of the expected result
- *
- * Returns a structured JSON response on success, conformant to the result_schema.
- * Returns plaintext on success if the content-type is application/octet-stream
- * Returns a structured {'error': ...} object on client-side error
- * Throws on server-side error
- */
-function httpRequest(options, result_schema, body) {
-
-    if (body) {
-       options['body'] = body;
-    }
-
-    const url = `http://${options.host}:${options.port}${options.path}`;
-    return fetch(url, options)
-    .then((response) => {
-
-        if(response.status >= 500) {
-           throw new Error(response.statusText);
-        }
-
-        if(response.status === 404) {
-           return {'error': 'No such file or directory', 'errno': ENOENT};
-        }
-
-        if(response.status === 403) {
-           return {'error': 'Access denied', 'errno': EACCES};
-        }
-
-        if(response.status === 401) {
-           return {'error': 'Invalid request', 'errno': EINVAL};
-        }
-
-        if(response.status === 400) {
-           return {'error': 'Operation not permitted', 'errno': EPERM};
-        }
-
-        let resp = null;
-        if (response.headers.get('content-type') === 'application/json') {
-           return response.json()
-           .then((resp) => {
-              return validateJSONResponse(resp, result_schema);
-           });
-        }
-        else {
-           return response.text();
-        }
-    });
-}
-
+const urlparse = require('url');
 
 /*
  * Convert a datastore public key to its ID.
@@ -167,126 +94,25 @@ export function datastoreGetId( ds_public_key_hex) {
 
 
 /*
- * Get a *uncompressed* public key (hex) from private key
- */
-function getPubkeyHex(privkey_hex) {
-   let privkey = BigInteger.fromBuffer( decodePrivateKey(privkey_hex) );
-   let public_key = new bitcoinjs.ECPair(privkey);
-
-   public_key.compressed = false;
-   let public_key_str = public_key.getPublicKeyBuffer().toString('hex');
-   return public_key_str;
-}
-
-
-/*
- * Get query string device list from datastore context
- */
-function getDeviceList(datastore_ctx) {
-   const escaped_device_ids = [];
-   for (let dk of datastore_ctx.app_public_keys) {
-      escaped_device_ids.push(escape(dk.device_id));
-   }
-   const res = escaped_device_ids.join(',');
-   return res;
-}
-
-
-/*
- * Get query string public key list from datastore context
- */
-function getPublicKeyList(datastore_ctx) {
-   const escaped_public_keys = [];
-   for (let dk of datastore_ctx.app_public_keys) {
-      escaped_public_keys.push(escape(dk.public_key));
-   }
-   const res = escaped_public_keys.join(',');
-   return res;
-}
-
-/*
- * Sanitize a path.  Consolidate // to /, and resolve foo/../bar to bar
- * @param path (String) the path
- *
- * Returns the sanitized path.
- */
-export function sanitizePath( path) {
-
-    const parts = path.split('/').filter(function(x) {return x.length > 0;});
-    const retparts = [];
-
-    for(let i = 0; i < parts.length; i++) {
-       if (parts[i] === '..') {
-          retparts.pop();
-       }
-       else {
-          retparts.push(parts[i]);
-       }
-    }
-
-    return '/' + retparts.join('/');
-}
-
-
-/*
- * Given a path, get the parent directory.
- *
- * @param path (String) the path.  Must be sanitized
- */
-export function dirname(path) {
-    return '/' + path.split('/').slice(0, -1).join('/');
-}
-
-
-/*
- * Given a path, get the base name
- *
- * @param path (String) the path. Must be sanitized
- */
-export function basename(path) {
-   return path.split('/').slice(-1)[0];
-}
-
-
-/*
- * Given a host:port string, split it into
- * a host and port
- *
- * @param hostport (String) the host:port
- *
- * Returns an object with:
- *      .host
- *      .port
- */
-function splitHostPort(hostport) {
-
-   let host = hostport;
-   let port = 80;
-   const parts = hostport.split(':');
-   if (parts.length > 1) {
-      host = parts[0];
-      port = parts[1];
-   }
-
-   return {'host': host, 'port': port};
-}
-
-
-/*
  * Create the signed request to create a datastore.
  * This information can be fed into datastoreCreate()
  * Returns an object with:
  *      .datastore_info: datastore information
  *      .datastore_sigs: signatures over the above.
  */
-export function datastoreCreateRequest( ds_type, ds_private_key_hex, drivers, device_id, all_device_ids) {
+export function datastoreCreateRequest(ds_type, ds_private_key_hex, drivers, device_id, all_device_ids) {
 
    assert(ds_type === 'datastore' || ds_type === 'collection');
    const root_uuid = uuid4();
 
    const ds_public_key = getPubkeyHex(ds_private_key_hex);
    const datastore_id = datastoreGetId( ds_public_key );
-   const root_blob_info = makeDirInodeBlob( datastore_id, datastore_id, root_uuid, {}, device_id, 1 );
+
+   // make empty device root
+   const device_root = makeEmptyDeviceRootDirectory(datastore_id, []);
+   const device_root_data_id = `${datastore_id}.${root_uuid}`;
+   const device_root_blob = makeDataInfo(device_root_data_id, jsonStableSerialize(device_root), device_id);
+   const device_root_str = jsonStableSerialize(device_root_blob);
 
    // actual datastore payload
    const datastore_info = {
@@ -298,24 +124,22 @@ export function datastoreCreateRequest( ds_type, ds_private_key_hex, drivers, de
    };
 
    const data_id = `${datastore_id}.datastore`;
-   const datastore_blob = makeMutableDataInfo( data_id, jsonStableSerialize(datastore_info), device_id, 1 );
-
+   const datastore_blob = makeDataInfo(data_id, jsonStableSerialize(datastore_info), device_id);
    const datastore_str = jsonStableSerialize(datastore_blob);
 
    // sign them all
-   const root_sig = signDataPayload( root_blob_info.header, ds_private_key_hex );
+   const root_sig = signDataPayload( device_root_str, ds_private_key_hex );
    const datastore_sig = signDataPayload( datastore_str, ds_private_key_hex );
 
    // make and sign tombstones for the root
-   const root_tombstones = makeInodeTombstones(datastore_id, root_uuid, all_device_ids);
-   const signed_tombstones = signMutableDataTombstones(root_tombstones, ds_private_key_hex);
+   const root_data_id = `${datastore_id}.${root_uuid}`;
+   const root_tombstones = makeDataTombstones(all_device_ids, root_data_id)
+   const signed_tombstones = signDataTombstones(root_tombstones, ds_private_key_hex);
 
    const info = {
       'datastore_info': {
-         'datastore_id': datastore_id,
          'datastore_blob': datastore_str,
-         'root_blob_header': root_blob_info.header,
-         'root_blob_idata': root_blob_info.idata,
+         'root_blob': device_root_str,
       },
       'datastore_sigs': {
          'datastore_sig': datastore_sig,
@@ -338,8 +162,7 @@ export function datastoreCreate( blockstack_hostport, blockstack_session_token, 
    const payload = {
       'datastore_info': {
           'datastore_blob': datastore_request.datastore_info.datastore_blob,
-          'root_blob_header': datastore_request.datastore_info.root_blob_header,
-          'root_blob_idata': datastore_request.datastore_info.root_blob_idata,
+          'root_blob': datastore_request.datastore_info.root_blob,
       },
       'datastore_sigs': {
           'datastore_sig': datastore_request.datastore_sigs.datastore_sig,
@@ -380,7 +203,10 @@ export function datastoreDeleteRequest(ds=null) {
       const blockchain_id = getSessionBlockchainID();
       assert(blockchain_id);
 
-      ds = getCachedMountContext(blockchain_id);
+      const app_name = getSessionAppName();
+      assert(app_name);
+
+      ds = getCachedMountContext(blockchain_id, app_name);
       assert(ds);
    }
 
@@ -388,12 +214,13 @@ export function datastoreDeleteRequest(ds=null) {
    const device_ids = ds.datastore.device_ids;
    const root_uuid = ds.datastore.root_uuid;
    const data_id = `${datastore_id}.datastore`;
+   const root_data_id = `${datastore_id}.${root_uuid}`;
 
-   const tombstones = makeMutableDataTombstones( device_ids, data_id );
-   const signed_tombstones = signMutableDataTombstones( tombstones, ds.privkey_hex );
+   const tombstones = makeDataTombstones( device_ids, data_id );
+   const signed_tombstones = signDataTombstones( tombstones, ds.privkey_hex );
 
-   const root_tombstones = makeInodeTombstones(datastore_id, root_uuid, device_ids);
-   const signed_root_tombstones = signMutableDataTombstones( root_tombstones, ds.privkey_hex );
+   const root_tombstones = makeDataTombstones(device_ids, root_data_id);
+   const signed_root_tombstones = signDataTombstones( root_tombstones, ds.privkey_hex );
 
    const ret = {
       'datastore_tombstones': signed_tombstones,
@@ -402,6 +229,7 @@ export function datastoreDeleteRequest(ds=null) {
 
    return ret;
 }
+
 
 /*
  * Delete a datastore
@@ -416,10 +244,14 @@ export function datastoreDeleteRequest(ds=null) {
 export function datastoreDelete(ds=null, ds_tombstones=null, root_tombstones=null) {
 
    if (!ds) {
-      const blockchain_id = getSessionBlockchainID();
+      const session = jsontokens.decodeToken(getSessionToken()).payload;
+      const blockchain_id = getSessionBlockchainIDOrDefault(session);
       assert(blockchain_id);
 
-      ds = getCachedMountContext(blockchain_id);
+      const app_name = getSessionAppName();
+      assert(app_name);
+
+      ds = getCachedMountContext(blockchain_id, app_name);
       assert(ds);
    }
 
@@ -429,7 +261,6 @@ export function datastoreDelete(ds=null, ds_tombstones=null, root_tombstones=nul
       root_tombstones = delete_info['root_tombstones'];
    }
 
-   const device_list = getDeviceList(ds);
    const payload = {
       'datastore_tombstones': ds_tombstones,
       'root_tombstones': root_tombstones,
@@ -439,7 +270,7 @@ export function datastoreDelete(ds=null, ds_tombstones=null, root_tombstones=nul
       'method': 'DELETE',
       'host': ds.host,
       'port': ds.port,
-      'path': `/v1/stores?device_ids=${device_list}`
+      'path': '/v1/stores',
    };
 
    options['headers'] = {'Authorization': `bearer ${getSessionToken()}`}
@@ -453,20 +284,100 @@ export function datastoreDelete(ds=null, ds_tombstones=null, root_tombstones=nul
 
 
 /*
+ * Are we in single-reader storage?
+ * i.e. does this device's session token own this datastore?
+ */
+function isSingleReaderMount(sessionToken, datastore_id) {
+   const blockchain_id = getSessionBlockchainID(sessionToken);
+
+   if (!blockchain_id) {
+      // no blockchain ID given means we can't be in multi-reader storage mode
+      return true;
+   }
+
+   if (datastore_id === sessionToken.app_user_id) {
+      // the session token indicates that the datastore we're mounting was, in fact,
+      // created by this device.  We can use datastore IDs and device IDs.
+      return true;
+   }
+
+   return false;
+}
+
+
+/*
+ * Make a request's query string for either single-reader
+ * or multi-reader storage, given the datastore mount context.
+ *
+ * Returns {'store_id': ..., 'qs': ..., 'host': ..., 'port': ...} on success
+ * Throws on error.
+ */
+export function datastoreRequestPathInfo(dsctx) {
+
+   assert( (dsctx.blockchain_id && dsctx.app_name) || (dsctx.datastore_id) );
+
+   if (!dsctx.blockchain_id && !dsctx.app_name) {
+
+      // single-reader mode
+      let device_ids = [];
+      let public_keys = [];
+
+      for (let apk of dsctx['app_public_keys']) {
+         device_ids.push(apk['device_id']);
+         public_keys.push(apk['public_key']);
+      }
+
+      let device_ids_str = device_ids.join(',');
+      let public_keys_str = public_keys.join(',');
+
+      let info = {
+         'store_id': dsctx.datastore_id,
+         'qs': `device_ids=${device_ids_str}&device_pubkeys=${public_keys_str}`,
+         'host': dsctx.host,
+         'port': dsctx.port,
+      };
+      
+      return info;
+   }
+   else {
+      
+      // multi-reader mode 
+      let info = {
+         'store_id': dsctx.app_name,
+         'qs': `blockchain_id=${dsctx.blockchain_id}`,
+         'host': dsctx.host,
+         'port': dsctx.port,
+      };
+
+      return info;
+   }
+}
+
+
+/*
  * Look up a datastore and establish enough contextual information to do subsequent storage operations.
  * Asynchronous; returns a Promise
  *
- * opts is an object that must contain either:
+ * opts is an object that must contain EITHER:
+ * * a single-reader datastore identifier, which is:
+ * * * datastoreID (string) the datastore ID
+ * * * deviceID (string) this device ID
+ * * * dataPubkeys (array) this is an array of {'device_id': ..., 'public_key': ...} objects, where one such object has `device_id` equal to opts.device_id
+ * OR
+ * * a multi-reader datastore identifier, which is:
+ * * * appName (string) the application name
+ * * * blockchainID (string) the blockchain ID that owns the datastore
+ * 
+ * If we're going to write to this datastore, then we *additionally* need:
  * * appPrivateKey (string) the application private key
- * * (optional) sessionToken (string) the Core session token, OR
- * * (optional) device_id (string) the device ID
+ * * sessionToken (string) the session JWT (optional)
  *
- * OR:
- *
- * * blockchainID (string) the blockchain ID of the user whose datastore we're going to access
- * * appName (string) the name of the application
- *
- * TODO: support accessing datastores from other users
+ * sessionToken may be given as an opt, in which case the following fields will be used
+ * if not provided in opts:
+ * * appName from session.app_domain
+ * * blockchainID from session.blockchain_id
+ * * dataPubkeys from session.app_public_keys
+ * * deviceID from session.device_id
  *
  * Returns a Promise that resolves to a datastore connection,
  * with the following properties:
@@ -484,97 +395,109 @@ export function datastoreMount(opts) {
 
    let sessionToken = opts.sessionToken;
    let blockchain_id = opts.blockchainID;
+   let app_name = opts.appName;
+   let candidate_datastore_id = opts.datastoreID;
+   let this_device_id = opts.deviceID;
+   let app_public_keys = opts.dataPubkeys;
+
    let session_blockchain_id = getSessionBlockchainID(sessionToken);
-   let datastore_id = null;
-   let device_id = null;
    let api_endpoint = null;
-   let app_public_keys = null;
+   if (data_privkey_hex) {
+      candidate_datastore_id = datastoreGetId(getPubkeyHex(data_privkey_hex));
+   }
+
+   if (!sessionToken) {
+      sessionToken = getSessionToken();
+      assert(sessionToken);
+   }
+      
+   const session = jsontokens.decodeToken(sessionToken).payload;
+   const session_app_name = getSessionAppName(sessionToken);
+
+   // will be set on single-reader mount
+   let datastore_id = null;
+
+   // will be set on multi-reader mount
+   let datastore_blockchain_id = null;
 
    // maybe cached?
-   if (blockchain_id && !no_cache) {
-       let ds = getCachedMountContext(blockchain_id);
+   if (!no_cache) {
+       let ds = getCachedMountContext(getBlockchainIDFromSessionOrDefault(session), session_app_name);
        if (ds) {
           return new Promise((resolve, reject) => { resolve(ds); });
        }
    }
-   
-   if (!blockchain_id || blockchain_id === session_blockchain_id) {
 
-       // assume the one in this session
-       if (!sessionToken) {
-          // load from localStorage
-          const userData = getUserData();
-
-          sessionToken = userData.coreSessionToken;
-          assert(sessionToken);
-       }
-
-       if (!blockchain_id){
-          blockchain_id = getSessionBlockchainID(sessionToken);
-       }
-
-       assert(blockchain_id);
-
-       const session = jsontokens.decodeToken(sessionToken).payload;
-
-       // TODO: can't get datastore_id from data_privkey_hex; we should pass it in as part of the session
-       // in order to handle the multi-device case.
-       device_id = session.device_id;
-       api_endpoint = session.api_endpoint;
-       app_public_keys = session.app_public_keys;
-       datastore_id = datastoreGetId(getPubkeyHex(data_privkey_hex));
-       blockchain_id = session_blockchain_id;
-   } 
-   else {
-      // TODO: look up the datastore information via Core
-      // TODO: blocked by Core's lack of support for token files
-      // TODO: set device_id, blockchain_id, app_public_keys
-      throw new Error("Multiplayer storage is not supported yet");
-   }
-
-   if (!device_id) {
-      device_id = session.device_id;
-      assert(device_id);
-   }
-
-   if (!api_endpoint) {
-      api_endpoint = session.api_endpoint;
-      assert(api_endpoint);
-   }
-
-   if (!blockchain_id) {
-      blockchain_id = getBlockchainIDFromSessionOrDefault(session);
+   // not cached.  setup from session token
+   if (!this_device_id) {
+       this_device_id = session.device_id;
+       assert(this_device_id);
    }
 
    if (!app_public_keys) {
-      app_public_keys = session.app_public_keys;
-      assert(app_public_keys);
+       app_public_keys = session.app_public_keys;
    }
 
-   const blockstack_hostport = api_endpoint.split('://').reverse()[0];
-   const scheme = api_endpoint.split('://')[0] == 'https' ? 'https': 'http';
-   const hostinfo = splitHostPort(blockstack_hostport);
+   api_endpoint = session.api_endpoint;
+
+   if (isSingleReaderMount(sessionToken, candidate_datastore_id)) {
+
+      // single-reader info
+      datastore_blockchain_id = null;
+      datastore_id = candidate_datastore_id;
+   }
+   else {
+
+      // multi-reader info
+      assert(app_name || session, 'Need either appName or sessionToken in opts');
+      if (!app_name && session) {
+          app_name = getSessionAppName(sessionToken);
+      }
+
+      datastore_blockchain_id = (blockchain_id ? blockchain_id : session_blockchain_id);
+      datastore_id = null;
+   }
+
+   assert((datastore_blockchain_id && app_name) || (datastore_id), `Need either blockchain_id (${datastore_blockchain_id}) / app_name (${app_name}) or datastore_id (${datastore_id})`);
+   
+   if (api_endpoint.indexOf('://') < 0) {
+      let new_api_endpoint = 'https://' + api_endpoint;
+      if (urlparse.parse(new_api_endpoint).hostname === 'localhost') {
+         new_api_endpoint = 'http://' + api_endpoint;
+      }
+
+      api_endpoint = new_api_endpoint;
+   }
+
+   const urlinfo = urlparse.parse(api_endpoint);
+   const blockstack_hostport = urlinfo.host;
+   const scheme = urlinfo.protocol.replace(':','');
+   const host = urlinfo.hostname;
+   const port = urlinfo.port;
 
    const ctx = {
       'scheme': scheme,
-      'host': hostinfo.host,
-      'port': hostinfo.port,
-      'blockchain_id': blockchain_id,
-      'device_id': device_id,
+      'host': host,
+      'port': port,
+      'blockchain_id': datastore_blockchain_id,
+      'app_name': app_name,
       'datastore_id': datastore_id,
       'app_public_keys': app_public_keys,
+      'device_id': this_device_id,
       'datastore': null,
+      'privkey_hex': null,
    };
 
    if (data_privkey_hex) {
       ctx.privkey_hex = data_privkey_hex;
    }
 
+   const path_info = datastoreRequestPathInfo(ctx);
    const options = {
       'method': 'GET',
-      'host': hostinfo.host,
-      'port': hostinfo.port,
-      'path': `/v1/stores/${datastore_id}?device_ids=${device_id}&blockchain_id=${blockchain_id}`,
+      'host': path_info.host,
+      'port': path_info.port,
+      'path': `/v1/stores/${path_info.store_id}?${path_info.qs}`,
    }
 
    console.log(`Mount datastore ${options.path}`);
@@ -583,7 +506,7 @@ export function datastoreMount(opts) {
    return httpRequest(options, DATASTORE_RESPONSE_SCHEMA).then((ds) => {
       if (!ds || ds.error) {
          // ENOENT?
-         if (!ds || ds.errno === ENOENT) {
+         if (!ds || ds.errno === 'ENOENT') {
              return null;
          }
          else {
@@ -596,266 +519,23 @@ export function datastoreMount(opts) {
 
          // this is required for testing purposes, since the core session token will not have been set
          let userData = getUserData();
-         if (!userData.coreSessionToken) {
+         if (!userData.coreSessionToken && sessionToken) {
             console.log("In test framework; saving session token");
             userData.coreSessionToken = sessionToken;
+
+            if (data_privkey_hex) {
+                userData.appPrivateKey = data_privkey_hex;
+            }
+
             setUserData(userData);
          }
 
          // save
-         setCachedMountContext(blockchain_id, ctx);
-
+         setCachedMountContext(getBlockchainIDFromSessionOrDefault(session), session_app_name, ctx);
          return ctx;
       }
    });
 }
-
-
-/*
- * Get a reference to our localStorage implementation
- */
-function getLocalStorage() {
-   // uncomment when testing locally.  Make sure node-localstorage is installed!
-   /*
-   let localStorage = null;
-    
-   if (typeof window === 'undefined' || window === null) {
-      const LocalStorage = require('node-localstorage').LocalStorage;
-      localStorage = new LocalStorage('./scratch');
-   }
-   else {
-      localStorage = window.localStorage;
-   }
-   */
-   return localStorage;
-}
-
-
-/*
- * Get local storage object for Blockstack
- * Throws on error
- */
-function getUserData() {
-
-   const localStorage = getLocalStorage();
-   let userData = localStorage.getItem(LOCAL_STORAGE_ID);
-   if (userData === null || typeof(userData) === 'undefined') {
-      userData = '{}';
-   }
-
-   userData = JSON.parse(userData);
-   return userData;
-}
-
-
-/*
- * Save local storage
- */
-function setUserData(userData) {
-
-   let u = getUserData();
-   if (u.coreSessionToken && userData.coreSessionToken) {
-      // only store the newer one 
-      let coreSessionToken = null;
-      if (u.coreSessionToken.timestamp < userData.coreSessionToken.timestamp) {
-         coreSessionToken = userData.coreSessionToken;
-      }
-      else {
-         coreSessionToken = u.coreSessionToken;
-      }
-      userData.coreSessionToken = coreSessionToken;
-   }
-   
-   localStorage.setItem(LOCAL_STORAGE_ID, JSON.stringify(userData));
-}
-
-/*
- * Get a cached app-specific datastore mount context for a given blockchain ID and application
- * Return null if not found
- * Throws on error
- */
-function getCachedMountContext(blockchain_id) {
-
-   let userData = getUserData();
-   assert(userData);
-
-   if (!userData.datastore_contexts) {
-      console.log("No datastore contexts defined");
-      return null;
-   }
-
-   if (!userData.datastore_contexts[blockchain_id]) {
-      console.log(`No datastore contexts for ${blockchain_id}`);
-      return null;
-   }
-
-   let ctx = userData.datastore_contexts[blockchain_id];
-   if (!ctx) {
-      console.log(`Null datastore context for ${blockchain_id}`);
-      return null;
-   }
-
-   return ctx;
-}
-
-
-/*
- * Cache a mount context for a blockchain ID
- */
-function setCachedMountContext(blockchain_id, datastore_context) {
-
-   let userData = getUserData();
-   assert(userData);
-
-   if (!userData.datastore_contexts) {
-      userData.datastore_contexts = {};
-   }
-
-   userData.datastore_contexts[blockchain_id] = datastore_context;
-   setUserData(userData);
-}
-
-function getBlockchainIDFromSessionOrDefault(session) {
-   if (! session.blockchain_id ){
-       return hashRawData(Buffer.from(session.app_user_id).toString('base64'));
-   }else{
-       return session.blockchain_id;
-   }
-}
-
-
-/*
- * Get the session token from localstorage
- */
-function getSessionToken() {
-    let userData = getUserData();
-    assert(userData);
-    assert(userData.coreSessionToken);
-
-    let sessionToken = userData.coreSessionToken;
-    return sessionToken;
-}
-
-
-/*
- * Get the current session's blockchain ID
- * Throw if not defined or not present.
- */
-function getSessionBlockchainID(sessionToken=null) {
-
-   if (!sessionToken) {
-      sessionToken = getSessionToken();
-   }
-
-   const session = jsontokens.decodeToken(sessionToken).payload;
-
-   return getBlockchainIDFromSessionOrDefault(session);
-}
-
-
-/*
- * Fulfill a replication strategy using the drivers available to us.
- *
- * replication_strategy (object): a dict that maps strategies (i.e. 'local', 'public', 'private') to integer counts
- * classes (object): this is session.storage.classes (i.e. the driver classification; maps a driver name to its list of classes)
- *
- * Returns the list of drivers to use.
- * Throws on error.
- */
-function selectDrivers(replication_strategy, classes) {
-
-   // select defaults from classification and replication strategy
-   let driver_sets = [];            // driver_sets[i] is the set of drivers that support SUPPORTED_STORAGE_CLASSES[i]
-   let driver_classes = {};         // map driver name to set of classes
-   let all_drivers = new Set([]);   // set of all drivers available to us
-   let available_drivers = [];      // drivers available to us
-   let selected_drivers = [];       // drivers compatible with our replication strategy (return value)
-   let have_drivers = false;        // whether or not we selected drivers that fulfill our replication strategy
-
-   for (let i = 0; i < SUPPORTED_STORAGE_CLASSES.length; i++) {
-      let driver_set = new Set(classes[SUPPORTED_STORAGE_CLASSES[i]]);
-      driver_sets.push(driver_set);
-
-      for(let d of driver_set) {
-          all_drivers.add(d);
-      }
-
-      for( let d of driver_set ) {
-         console.log(`Driver ${d} implementes ${SUPPORTED_STORAGE_CLASSES[i]}`);
-         if (driver_classes[d]) {
-            driver_classes[d].push(SUPPORTED_STORAGE_CLASSES[i]);
-         }
-         else {
-            driver_classes[d] = [SUPPORTED_STORAGE_CLASSES[i]];
-         }
-      }
-   }
-
-   let concern_fulfillment = {};
-
-   for (let d of all_drivers) {
-      let classes = driver_classes[d];
-
-      // a driver fits the replication strategy if all of its
-      // classes matches at least one concern (i.e. 'local', 'public')
-      for (let concern of Object.keys(replication_strategy)) {
-
-          let matches = false;
-          for (let dclass of classes) {
-             if (REPLICATION_STRATEGY_CLASSES[concern].has(dclass)) {
-                matches = true;
-                break;
-             }
-          }
-
-          if (matches) {
-             console.log(`Driver ${d} fulfills replication concern ${concern}`);
-
-             if (concern_fulfillment[concern]) {
-                concern_fulfillment[concern] += 1;
-             }
-             else {
-                concern_fulfillment[concern] = 1;
-             }
-
-             if (concern_fulfillment[concern] <= replication_strategy[concern]) {
-                console.log(`Select driver ${d}`);
-                selected_drivers.push(d);
-             }
-          }
-
-          // strategy fulfilled?
-          let fulfilled = true;
-          for (let concern of Object.keys(replication_strategy)) {
-             let count = 0;
-             if (concern_fulfillment[concern]) {
-                count = concern_fulfillment[concern];
-             }
-
-             if (count < replication_strategy[concern]) {
-                fulfilled = false;
-                break;
-             }
-          }
-
-          if (fulfilled) {
-             have_drivers = true;
-             break;
-          }
-      }
-
-      if (have_drivers) {
-         break;
-      }
-   }
-
-   if (!have_drivers) {
-      throw new Error("Unsatisfiable replication strategy");
-   }
-
-   return selected_drivers;
-}
-
 
 
 /*
@@ -877,16 +557,18 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
 
    // decode
    const session = jsontokens.decodeToken(sessionToken).payload;
-   var blockchain_id = getBlockchainIDFromSessionOrDefault(session);
+   const session_blockchain_id = getBlockchainIDFromSessionOrDefault(session);
+   const session_app_name = getSessionAppName(sessionToken);
 
-   let ds = getCachedMountContext(blockchain_id);
+   // cached?
+   let ds = getCachedMountContext(session_blockchain_id, session_app_name);
    if (ds) {
       return new Promise((resolve, reject) => { resolve(ds); });
    }
 
    // no cached datastore context.
    // go ahead and create one (need appPrivateKey)
-   if(!appPrivateKey) {
+   if (!appPrivateKey) {
       const userData = getUserData();
 
       appPrivateKey = userData.appPrivateKey;
@@ -909,12 +591,13 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
    }
 
    let drivers = null;
+   let app_name = getSessionAppName(sessionToken);
 
    // find satisfactory storage drivers
-   if (Object.keys(session.storage.preferences).includes(session.app_domain)) {
+   if (Object.keys(session.storage.preferences).includes(app_name)) {
 
       // app-specific preference
-      drivers = session.storage.preferences[app_domain];
+      drivers = session.storage.preferences[app_name];
    }
    else {
 
@@ -922,13 +605,24 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
       drivers = selectDrivers(replication_strategy, session.storage.classes);
    }
 
-   const hostport = session.api_endpoint.split('://').reverse()[0];
+   let api_endpoint = session.api_endpoint;
+ 
+   if (api_endpoint.indexOf('://') < 0) {
+      let new_api_endpoint = 'https://' + api_endpoint;
+      if (urlparse.parse(new_api_endpoint).hostname === 'localhost') {
+         new_api_endpoint = 'http://' + api_endpoint;
+      }
+
+      api_endpoint = new_api_endpoint;
+   }
+
+   const hostport = urlparse.parse(api_endpoint).host;
    const appPublicKeys = session.app_public_keys;
    const deviceID = session.device_id;
    const allDeviceIDs = [];
 
-   for (let i = 0; i < appPublicKeys.length; i++) {
-      allDeviceIDs.push(appPublicKeys[i].device_id);
+   for (let apk of appPublicKeys) {
+      allDeviceIDs.push(apk['device_id']);
    }
 
    console.log(`Will use drivers ${drivers.join(',')}`);
@@ -945,13 +639,13 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
          // does not exist
          console.log("Datastore does not exist; creating...");
 
-         const info = datastoreCreateRequest('datastore', appPrivateKey, drivers, deviceID, allDeviceIDs );
+         const info = datastoreCreateRequest('datastore', appPrivateKey, drivers, deviceID, allDeviceIDs);
 
          // go create it
-         return datastoreCreate( hostport, sessionToken, info )
+         return datastoreCreate(hostport, sessionToken, info)
          .then((res) => {
             if (res.error) {
-               console.log(error);
+               console.log(res.error);
                let errorNo = res.errno || 'UNKNOWN';
                let errorMsg = res.error || 'UNKNOWN';
                throw new Error(`Failed to create datastore (errno ${errorNo}): ${errorMsg}`);
@@ -975,775 +669,3 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
 }
 
 
-/*
- * Path lookup
- *
- * @param path (String) the path to the inode
- * @param opts (Object) optional arguments:
- *      .extended (Bool) whether or not to include the entire path's inode information
- *      .force (Bool) if True, then ignore stale inode errors.
- *      .idata (Bool) if True, then get the inode payload as well
- *      .blockchain_id (String) this is the blockchain ID of the datastore owner, if different from the session token
- *      .ds (datastore context) if given, then use this datastore mount context instead of one from localstorage
- *
- * Returns a promise that resolves to a lookup response schema (or an extended lookup response schema, if opts.extended is set)
- */
-export function lookup(path, opts={}) {
-
-   let blockchain_id = opts.blockchainID;
-
-   if (!blockchain_id) {
-      blockchain_id = getSessionBlockchainID();
-   }
-
-   return datastoreMount({'blockchainID': blockchain_id})
-   .then((ds) => {
-      assert(ds);
-
-      const datastore_id = ds.datastore_id;
-      const device_list = getDeviceList(ds);
-      const device_pubkeys = getPublicKeyList(ds);
-      const options = {
-         'method': 'GET',
-         'host': ds.host,
-         'port': ds.port,
-         'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitizePath(path))}&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${blockchain_id}`,
-      };
-
-      if (!opts) {
-         opts = {};
-      }
-
-      let schema = DATASTORE_LOOKUP_RESPONSE_SCHEMA;
-
-      if (opts.extended) {
-         options['path'] += '&extended=1';
-         schema = DATASTORE_LOOKUP_EXTENDED_RESPONSE_SCHEMA;
-      }
-
-      if (opts.force) {
-         options['path'] += '&force=1';
-      }
-
-      if (opts.idata) {
-         options['idata'] += '&idata=1';
-      }
-
-      return httpRequest(options, schema)
-      .then((lookup_response) => {
-         if (lookup_response.error || lookup_response.errno) {
-            let errorMsg = lookup_response.error || 'UNKNOWN';
-            let errorNo = lookup_response.errno || 'UNKNOWN';
-            throw new Error(`Failed to look up ${path} (errno: ${errorNo}): ${errorMsg}`);
-         }
-         else {
-            return lookup_response;
-         }
-      });
-   });
-}
-
-
-/*
- * List a directory.
- *
- * @param path (String) the path to the directory to list
- * @param opts (Object) optional arguments:
- *      .extended (Bool) whether or not to include the entire path's inode inforamtion
- *      .force (Bool) if True, then ignore stale inode errors.
- *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
- *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
- *
- * Asynchronous; returns a Promise that resolves to either directory idata, or an extended mutable datum response (if opts.extended is set)
- */
-export function listdir(path, opts={}) {
-
-   let blockchain_id = opts.blockchainID;
-
-   if (!blockchain_id) {
-      blockchain_id = getSessionBlockchainID();
-   }
-
-   return datastoreMount({'blockchainID': blockchain_id})
-   .then((ds) => {
-
-      assert(ds);
-
-      const datastore_id = ds.datastore_id;
-      const device_list = getDeviceList(ds);
-      const device_pubkeys = getPublicKeyList(ds);
-      const options = {
-         'method': 'GET',
-         'host': ds.host,
-         'port': ds.port,
-         'path': `/v1/stores/${datastore_id}/directories?path=${escape(sanitizePath(path))}&idata=1&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${blockchain_id}`,
-      };
-
-      let schema = MUTABLE_DATUM_DIR_IDATA_SCHEMA;
-
-      if (!opts) {
-         opts = {};
-      }
-
-      if (opts.extended) {
-         options['path'] += '&extended=1';
-         schema = MUTABLE_DATUM_EXTENDED_RESPONSE_SCHEMA;
-      }
-
-      if (opts.force) {
-         optsion['path'] += '&force=1';
-      }
-
-      return httpRequest(options, schema)
-      .then((response) => {
-         if (response.error || response.errno) {
-            let errorMsg = response.error || 'UNKNOWN';
-            let errorNo = response.errno || 'UNKNOWN';
-            throw new Error(`Failed to listdir ${path} (errno: ${errorNo}): ${errorMsg}`);
-         }
-         else {
-            return response;
-         }
-      });
-   });
-}
-
-
-/*
- * Stat a file or directory (i.e. get the inode header)
- *
- * @param path (String) the path to the directory to list
- * @param opts (Object) optional arguments:
- *      .extended (Bool) whether or not to include the entire path's inode inforamtion
- *      .force (Bool) if True, then ignore stale inode errors.
- *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
- *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
- *
- * Asynchronous; returns a Promise that resolves to either an inode schema, or a mutable datum extended response schema (if opts.extended is set)
- */
-export function stat(path, opts={}) {
-
-   let ds = opts.ds;
-   let blockchain_id = opts.blockchainID;
-
-   if (!blockchain_id) {
-      blockchain_id = getSessionBlockchainID();
-   }
-
-   return datastoreMount({'blockchainID': blockchain_id})
-   .then((ds) => {
-
-      assert(ds);
-
-      const datastore_id = ds.datastore_id;
-      const device_list = getDeviceList(ds);
-      const device_pubkeys = getPublicKeyList(ds);
-      const options = {
-         'method': 'GET',
-         'host': ds.host,
-         'port': ds.port,
-         'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitizePath(path))}&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${blockchain_id}`,
-      };
-
-      let schema = MUTABLE_DATUM_INODE_SCHEMA;
-
-      if (!opts) {
-         opts = {};
-      }
-
-      if (opts.extended) {
-         options['path'] += '&extended=1';
-         schema = MUTABLE_DATUM_EXTENDED_RESPONSE_SCHEMA;
-      }
-
-      if (opts.force) {
-         optsion['path'] += '&force=1';
-      }
-
-      return httpRequest(options, schema)
-      .then((response) => {
-         if (response.error || response.errno) {
-            let errorMsg = response.error || 'UNKNOWN';
-            let errorNo = response.errno || 'UNKNOWN';
-            throw new Error(`Failed to stat ${path} (errno: ${errorNo}): ${errorMsg}`);
-         }
-         else {
-            return response;
-         }
-      });
-   });
-}
-
-
-/*
- * Get an undifferentiated file or directory and its data.
- * Low-level method, not meant for external consumption.
- *
- * @param path (String) the path to the directory to list
- * @param opts (Object) optional arguments:
- *      .extended (Bool) whether or not to include the entire path's inode inforamtion
- *      .force (Bool) if True, then ignore stale inode errors.
- *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
- *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
- *
- * Asynchronous; returns a Promise that resolves to an inode and its data, or an extended mutable datum response (if opts.extended is set)
- */
-function getInode(path, opts={}) {
-
-   let blockchain_id = opts.blockchainID;
-
-   if (!blockchain_id) {
-      blockchain_id = getSessionBlockchainID();
-   }
-
-   return datastoreMount({'blockchainID': blockchain_id})
-   .then((ds) => {
-
-      assert(ds);
-
-      const datastore_id = ds.datastore_id;
-      const device_list = getDeviceList(ds);
-      const device_pubkeys = getPublicKeyList(ds);
-      const options = {
-         'method': 'GET',
-         'host': ds.host,
-         'port': ds.port,
-         'path': `/v1/stores/${datastore_id}/inodes?path=${escape(sanitizePath(path))}&idata=1&extended=1&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${blockchain_id}`,
-      };
-
-      let schema = MUTABLE_DATUM_EXTENDED_RESPONSE_SCHEMA;
-
-      if (!opts) {
-         opts = {};
-      }
-
-      if (opts.extended) {
-         options['path'] += '&extended=1';
-         schema = MUTABLE_DATUM_EXTENDED_RESPONSE_SCHEMA;
-      }
-
-      if (opts.force) {
-         options['path'] += '&force=1';
-      }
-
-      return httpRequest(options, schema)
-      .then((response) => {
-         if (response.error || response.errno) {
-            let errorMsg = response.error || 'UNKNOWN';
-            let errorNo = response.errno || 'UNKNOWN';
-            throw new Error(`Failed to getInode ${path} (errno: ${errorNo}): ${errorMsg}`);
-         }
-         else {
-
-            // act on hints
-            // * if this is a directory, and there are "absent children"
-            // (i.e. children that we tried but only partially succeeded to create),
-            // then erase them.
-            let inode = response.inode_info.inode;
-            if (inode.type === MUTABLE_DATUM_DIR_TYPE && response.hints && response.hints.children_absent) {
-               for (let child_name of response.hints.children_absent) {
-                  if (Object.keys(inode.idata.children).includes(child_name)) {
-                     // mask this 
-                     console.log(`child inode ${child_name} is only partially-created; masking...`);
-                     delete response.inode_info.inode.idata.children[child_name];
-                  }
-               }
-            }
-
-            return response;
-         }
-      });
-   });
-}
-
-
-/*
- * Get the URL to a file.  A caller can fetch() from it.
- *
- * @param path (String) the path to the file to read
- * @param opts (Object) optional arguments:
- *      .extended (Bool) whether or not to include the entire path's inode inforamtion
- *      .force (Bool) if True, then ignore stale inode errors.
- *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
- *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
- *
- * Asynchronous; returns a Promise that resolves to the URL.
- */
-export function getFileURL(path, opts={}) {
-
-   let blockchain_id = opts.blockchainID;
-
-   if (!blockchain_id) {
-      blockchain_id = getSessionBlockchainID();
-   }
-   
-   return datastoreMount({'blockchainID': blockchain_id})
-   .then((ds) => {
-      assert(ds);
-
-      const scheme = ds.scheme;
-      const host = ds.host;
-      const port = ds.port;
-      const datastore_id = ds.datastore_id;
-      const device_list = getDeviceList(ds);
-      const device_pubkeys = getPublicKeyList(ds);
-      const urlpath = `/v1/stores/${datastore_id}/files?path=${escape(sanitizePath(path))}&idata=1&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${blockchain_id}`;
-
-      return `${scheme}://${host}:${port}${urlpath}`;
-   });
-}
-
-
-/*
- * Get a file.
- *
- * @param path (String) the path to the file to read
- * @param opts (Object) optional arguments:
- *      .extended (Bool) whether or not to include the entire path's inode inforamtion
- *      .force (Bool) if True, then ignore stale inode errors.
- *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
- *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
- *
- * Asynchronous; returns a Promise that resolves to either raw data, or an extended mutable data response schema (if opts.extended is set).
- * If the file does not exist, then the Promise resolves to null.  Any other errors result in an Error being thrown.
- */
-export function getFile(path, opts={}) {
-
-   let blockchain_id = opts.blockchainID;
-
-   if (!blockchain_id) {
-      blockchain_id = getSessionBlockchainID();
-   }
-   
-   return datastoreMount({'blockchainID': blockchain_id})
-   .then((ds) => {
-      assert(ds);
-
-      const datastore_id = ds.datastore_id;
-      const device_list = getDeviceList(ds);
-      const device_pubkeys = getPublicKeyList(ds);
-      const options = {
-         'method': 'GET',
-         'host': ds.host,
-         'port': ds.port,
-         'path': `/v1/stores/${datastore_id}/files?path=${escape(sanitizePath(path))}&idata=1&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${blockchain_id}`,
-      };
-
-      let schema = 'bytes';
-
-      if (!opts) {
-         opts = {};
-      }
-
-      if (opts.extended) {
-         options['path'] += '&extended=1';
-         schema = MUTABLE_DATUM_EXTENDED_RESPONSE_SCHEMA;
-      }
-
-      if (opts.force) {
-         options['path'] += '&force=1';
-      }
-
-      return httpRequest(options, schema)
-      .then((response) => {
-         if (response.error || response.errno) {
-            // ENOENT?
-            if (response.errno === ENOENT) {
-               return null;
-            }
-
-            // some other error
-            let errorMsg = response.error || 'UNKNOWN';
-            let errorNo = response.errno || 'UNKNOWN';
-            throw new Error(`Failed to getFile ${path} (errno: ${errorNo}): ${errorMsg}`);
-         }
-         else {
-            return response;
-         }
-      });
-   });
-}
-
-
-/*
- * Execute a datastore operation
- *
- * @param ds (Object) a datastore context
- * @param operation (String) the specific operation being carried out.
- * @param path (String) the path of the operation
- * @param inodes (Array) the list of inode headers to replicate
- * @param payloads (Array) the list of inode payloads in 1-to-1 correspondence to the headers
- * @param signatures (Array) the list of signatures over each inode header (also 1-to-1 correspondence)
- * @param tombstones (Array) the list of signed inode tombstones
- *
- * Asynchronous; returns a Promise that resolves to True if the operation succeeded
- */
-function datastoreOperation(ds, operation, path, inodes, payloads, signatures, tombstones) {
-
-   let request_path = null;
-   let http_operation = null;
-   const datastore_id = ds.datastore_id;
-   const datastore_privkey = ds.privkey_hex;
-   const device_list = getDeviceList(ds);
-   const device_pubkeys = getPublicKeyList(ds);
-
-   assert(inodes.length === payloads.length);
-   assert(payloads.length === signatures.length);
-
-   if (operation === 'mkdir') {
-      request_path = `/v1/stores/${datastore_id}/directories?path=${escape(sanitizePath(path))}&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${ds.blockchain_id}`;
-      http_operation = 'POST';
-
-      assert(inodes.length === 2);
-   }
-   else if (operation === 'putFile') {
-      request_path = `/v1/stores/${datastore_id}/files?path=${escape(sanitizePath(path))}&device_ids=${device_list}&device_pubkeys=${device_pubkeys}&blockchain_id=${ds.blockchain_id}`;
-      http_operation = 'PUT';
-
-      assert(inodes.length === 1 || inodes.length === 2);
-   }
-   else if (operation === 'rmdir') {
-      request_path = `/v1/stores/${datastore_id}/directories?path=${escape(sanitizePath(path))}&device_pubkeys=${device_pubkeys}&device_ids=${device_list}&blockchain_id=${ds.blockchain_id}`;
-      http_operation = 'DELETE';
-
-      assert(inodes.length === 1);
-      assert(tombstones.length >= 1);
-   }
-   else if (operation === 'deleteFile') {
-      request_path = `/v1/stores/${datastore_id}/files?path=${escape(sanitizePath(path))}&device_pubkeys=${device_pubkeys}&device_ids=${device_list}&blockchain_id=${ds.blockchain_id}`;
-      http_operation = 'DELETE';
-
-      assert(inodes.length === 1);
-      assert(tombstones.length >= 1);
-   }
-   else {
-      console.log(`invalid operation ${operation}`);
-      throw new Error(`Invalid operation ${operation}`);
-   }
-
-   const options = {
-      'method': http_operation,
-      'host': ds.host,
-      'port': ds.port,
-      'path': request_path,
-   };
-
-   options['headers'] = {'Authorization': `bearer ${getSessionToken()}`}
-
-   const datastore_str = JSON.stringify(ds.datastore);
-   const datastore_sig = signRawData( datastore_str, datastore_privkey );
-
-   const body_struct = {
-      'inodes': inodes,
-      'payloads': payloads,
-      'signatures': signatures,
-      'tombstones': tombstones,
-      'datastore_str': datastore_str,
-      'datastore_sig': datastore_sig,
-   }
-
-   const body = JSON.stringify(body_struct);
-   options['headers']['Content-Type'] = 'application/json';
-   options['headers']['Content-Length'] = body.length;
-
-   return httpRequest(options, SUCCESS_FAIL_SCHEMA, body)
-   .then((response) => {
-      if (response.error || response.errno) {
-         let errorMsg = response.error || 'UNKNOWN';
-         let errorNo = response.errno || 'UNKNOWN';
-         throw new Error(`Failed to ${operation} ${path} (errno: ${errorNo}): ${errorMsg}`);
-      }
-      else {
-         return true;
-      }
-   });
-}
-
-
-/*
- * Given a path, get its parent directory
- * Make sure it's a directory.
- *
- * @param path (String) the path to the inode in question
- * @param opts (Object) lookup options
- *      .extended (Bool) whether or not to include the entire path's inode inforamtion
- *      .force (Bool) if True, then ignore stale inode errors.
- *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
- *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
- *
- * Asynchronous; returns a Promise that resolves to the inode
- */
-function getParent(path, opts={}) {
-   const dirpath = dirname(path);
-   return getInode(dirpath, opts)
-   .then((response) => {
-      if (!response) {
-         return {'error': 'Failed to get parent', 'errno': EREMOTEIO};
-      }
-
-      let inode = response.inode_info.inode;
-
-      if (inode.type !== MUTABLE_DATUM_DIR_TYPE) {
-         return {'error': 'Not a directory', 'errno': ENOTDIR}
-      }
-      else {
-         return inode;
-      }
-   },
-   (error_resp) => {
-      console.log(error_resp);
-      return {'error': 'Failed to get inode', 'errno': EREMOTEIO};
-   });
-}
-
-
-/*
- * Create or update a file
- *
- * @param path (String) the path to the file to create (must not exist)
- * @param file_buffer (Buffer or String) the file contents
- * @param opts (Object) lookup options
- *      .extended (Bool) whether or not to include the entire path's inode inforamtion
- *      .force (Bool) if True, then ignore stale inode errors.
- *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
- *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
- *
- * Asynchronous; returns a Promise
- */
-export function putFile(path, file_buffer, opts={}) {
-
-   let blockchain_id = opts.blockchainID;
-
-   if (!blockchain_id) {
-      blockchain_id = getSessionBlockchainID();
-   }
-
-   return datastoreMountOrCreate()
-   .then((ds) => {
-
-      assert(ds);
-
-      const datastore_id = ds.datastore_id;
-      const device_id = ds.device_id;
-      const privkey_hex = ds.privkey_hex;
-
-      path = sanitizePath(path);
-      const child_name = basename(path);
-
-      assert(typeof(file_buffer) === 'string' || (file_buffer instanceof Buffer));
-
-      // get parent dir
-      return getParent(path, opts)
-      .then((parent_dir) => {
-         if (parent_dir.error) {
-            throw new Error(`Failed to look up ${dirname(path)}: ${parent_dir.error}`);
-         }
-
-         // make the file inode information
-         let file_payload = file_buffer;
-         let file_hash = null;
-         if (typeof(file_payload) !== 'string') {
-            // buffer
-            file_payload = file_buffer.toString('base64');
-            file_hash = hashDataPayload( file_buffer.toString() );
-         }
-         else {
-            // string
-            file_payload = Buffer.from(file_buffer).toString('base64');
-            file_hash = hashDataPayload( file_buffer );
-         }
-
-         assert(file_hash);
-
-         let inode_uuid = null;
-         let new_parent_dir_inode = null;
-         let child_version = null;
-
-         // new or existing?
-         if (Object.keys(parent_dir['idata']['children']).includes(child_name)) {
-
-            // existing; no directory change
-            inode_uuid = parent_dir['idata']['children'][child_name]['uuid'];
-            new_parent_dir_inode = inodeDirLink(parent_dir, MUTABLE_DATUM_FILE_TYPE, child_name, inode_uuid, true );
-         }
-         else {
-
-            // new
-            inode_uuid = uuid4();
-            new_parent_dir_inode = inodeDirLink(parent_dir, MUTABLE_DATUM_FILE_TYPE, child_name, inode_uuid, false );
-         }
-
-         const version = getChildVersion(parent_dir, child_name);
-         const inode_info = makeFileInodeBlob( datastore_id, datastore_id, inode_uuid, file_hash, device_id, version );
-         const inode_sig = signDataPayload( inode_info['header'], privkey_hex );
-
-         // make the directory inode information
-         const new_parent_info = makeDirInodeBlob( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata']['children'], device_id, new_parent_dir_inode['version'] + 1);
-         const new_parent_sig = signDataPayload( new_parent_info['header'], privkey_hex );
-
-         // post them
-         const new_parent_info_b64 = new Buffer(new_parent_info['idata']).toString('base64');
-         return datastoreOperation(ds, 'putFile', path, [inode_info['header'], new_parent_info['header']], [file_payload, new_parent_info_b64], [inode_sig, new_parent_sig], []);
-      });
-   });
-}
-
-
-/*
- * Create a directory.
- *
- * @param path (String) path to the directory
- * @param opts (object) optional arguments
- *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
- *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
- *
- * Asynchronous; returns a Promise
- */
-export function mkdir(path, opts={}) {
-
-   return datastoreMountOrCreate()
-   .then((ds) => {
-
-      assert(ds);
-
-      const datastore_id = ds.datastore_id;
-      const device_id = ds.device_id;
-      const privkey_hex = ds.privkey_hex;
-
-      path = sanitizePath(path);
-      const child_name = basename(path);
-
-      return getParent(path, opts)
-      .then((parent_dir) => {
-         if (parent_dir.error) {
-            throw new Error(`Failed to look up ${dirname(path)}: ${parent_dir.error}`);
-         }
-
-         // must not exist
-         if (Object.keys(parent_dir['idata']['children']).includes(child_name)) {
-            return {'error': 'File or directory exists', 'errno': EEXIST};
-         }
-
-         // make the directory inode information
-         const inode_uuid = uuid4();
-         const inode_info = makeDirInodeBlob( datastore_id, datastore_id, inode_uuid, {}, device_id);
-         const inode_sig = signDataPayload( inode_info['header'], privkey_hex );
-
-         // make the new parent directory information
-         const new_parent_dir_inode = inodeDirLink(parent_dir, MUTABLE_DATUM_DIR_TYPE, child_name, inode_uuid);
-         const new_parent_info = makeDirInodeBlob( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata']['children'], device_id, new_parent_dir_inode['version'] + 1);
-         const new_parent_sig = signDataPayload( new_parent_info['header'], privkey_hex );
-
-         // post them
-         return datastoreOperation(ds, 'mkdir', path, [inode_info['header'], new_parent_info['header']], [inode_info['idata'], new_parent_info['idata']], [inode_sig, new_parent_sig], []);
-      });
-   });
-}
-
-
-/*
- * Delete a file
- *
- * @param path (String) path to the directory
- * @param opts (Object) options for this call
- *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
- *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
- *
- * Asynchronous; returns a Promise
- */
-export function deleteFile(path, opts={}) {
-
-   return datastoreMountOrCreate()
-   .then((ds) => {
-
-      assert(ds);
-
-      const datastore_id = ds.datastore_id;
-      const device_id = ds.device_id;
-      const privkey_hex = ds.privkey_hex;
-      const all_device_ids = ds.datastore.device_ids;
-
-      path = sanitizePath(path);
-      const child_name = basename(path);
-
-      return getParent(path, opts)
-      .then((parent_dir) => {
-         if (parent_dir.error) {
-            throw new Error(`Failed to look up ${dirname(path)}: ${parent_dir.error}`);
-         }
-
-         // no longer exists?
-         if (!Object.keys(parent_dir['idata']['children']).includes(child_name)) {
-            return {'error': 'No such file or directory', 'errno': ENOENT};
-         }
-
-         const inode_uuid = parent_dir['idata']['children'][child_name]['uuid'];
-
-         // unlink
-         const new_parent_dir_inode = inodeDirUnlink(parent_dir, child_name);
-         const new_parent_info = makeDirInodeBlob( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata']['children'], device_id, new_parent_dir_inode['version'] + 1 );
-         const new_parent_sig = signDataPayload( new_parent_info['header'], privkey_hex );
-
-         // make tombstones
-         const tombstones = makeInodeTombstones(datastore_id, inode_uuid, all_device_ids);
-         const signed_tombstones = signMutableDataTombstones(tombstones, privkey_hex);
-
-         // post them
-         return datastoreOperation(ds, 'deleteFile', path, [new_parent_info['header']], [new_parent_info['idata']], [new_parent_sig], signed_tombstones);
-      });
-   });
-}
-
-
-/*
- * Remove a directory
- *
- * @param path (String) path to the directory
- * @param opts (Object) options for this call
- *      .blockchain_id (string) this is the blockchain ID of the datastore owner (if different from the session)
- *      .ds (datastore context) this is the mount context for the datastore, if different from one that we have cached
- *
- * Asynchronous; returns a Promise
- */
-export function rmdir(path, opts={}) {
-
-   return datastoreMountOrCreate()
-   .then((ds) => {
-
-      assert(ds);
-
-      const datastore_id = ds.datastore_id;
-      const device_id = ds.device_id;
-      const privkey_hex = ds.privkey_hex;
-      const all_device_ids = ds.datastore.device_ids;
-
-      path = sanitizePath(path);
-      const child_name = basename(path);
-
-      return getParent(path, opts)
-      .then((parent_dir) => {
-         if (parent_dir.error) {
-            throw new Error(`Failed to look up ${dirname(path)}: ${parent_dir.error}`);
-         }
-
-         // no longer exists?
-         if (!Object.keys(parent_dir['idata']['children']).includes(child_name)) {
-            return {'error': 'No such file or directory', 'errno': ENOENT};
-         }
-
-         const inode_uuid = parent_dir['idata']['children'][child_name]['uuid'];
-
-         // unlink
-         const new_parent_dir_inode = inodeDirUnlink(parent_dir, child_name);
-         const new_parent_info = makeDirInodeBlob( datastore_id, new_parent_dir_inode['owner'], new_parent_dir_inode['uuid'], new_parent_dir_inode['idata']['children'], device_id, new_parent_dir_inode['version'] + 1 );
-         const new_parent_sig = signDataPayload( new_parent_info['header'], privkey_hex );
-
-         // make tombstones
-         const tombstones = makeInodeTombstones(datastore_id, inode_uuid, all_device_ids);
-         const signed_tombstones = signMutableDataTombstones(tombstones, privkey_hex);
-
-         // post them
-         return datastoreOperation(ds, 'rmdir', path, [new_parent_info['header']], [new_parent_info['idata']], [new_parent_sig], signed_tombstones);
-      });
-   });
-}
