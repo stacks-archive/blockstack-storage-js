@@ -284,7 +284,7 @@ function node_ping(host, port) {
  * Run all unit tests.
  * Returns a Promise onto which more tests can be tacked on.
  */
-function do_unit_tests_write( blockchain_id, privkey=null, delete_files=true ) {
+function do_unit_tests_write( blockchain_id, privkey=null, create_datastore=true, delete_files=true ) {
 
    var api_password = "blockstack_integration_test_api_password";
    var test_host = 'localhost';
@@ -336,32 +336,59 @@ function do_unit_tests_write( blockchain_id, privkey=null, delete_files=true ) {
               process.exit(1);
            }
 
-           return getOrCreateDatastore({'local': 1}, session_token, datastore_privkey_hex);
+           if (create_datastore) {
+               return getOrCreateDatastore({'local': 1}, session_token, datastore_privkey_hex);
+           }
+           else {
+
+               // store (simulate sign-in)
+               var user_data = getUserData();
+               user_data.coreSessionToken = session_token;
+               setUserData(user_data);
+
+               var app_name = URL.parse(jsontokens.decodeToken(session_token).payload.app_domain).host;
+               return getDatastore({'blockchainID': blockchain_id, 'appName': app_name, 'appPrivateKey': datastore_privkey_hex})
+           }
 
       }, (error) => {console.log("get session token failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
-           console.log(`getOrCreateDatastore (create) result: ${JSON.stringify(res)}`);
+           if (create_datastore) {
+               console.log(`getOrCreateDatastore (create) result: ${JSON.stringify(res)}`);
+           }
+           else {
+               console.log(`getDatastore result: ${JSON.stringify(res)}`);
+           }
+
            if( !res || res.error ) {
               console.log(res);
               process.exit(1);
            }
 
-           // make sure it's idempotent
-           return getOrCreateDatastore({'local': 1}, session_token, datastore_privkey_hex);
+           if (create_datastore) {
+               // make sure it's idempotent
+               return getOrCreateDatastore({'local': 1}, session_token, datastore_privkey_hex);
+           }
+           else {
+               datastore = res.datastore;
+               datastore_str = JSON.stringify(res);
+               return true;
+           }
 
-      }, (error) => {console.log("getOrCreateDatastore (create) failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      }, (error) => {console.log(`get/create datastore (create=${create_datastore}) failed:`); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
-           console.log(`getOrCreateDatastore (get) result: ${JSON.stringify(res)}`);
-           if( !res || res.error ) {
-              console.log(res);
-              console.log("exiting");
-              process.exit(1);
-           }
+           if (create_datastore) {
+               console.log(`getOrCreateDatastore (get) result: ${JSON.stringify(res)}`);
+               if( !res || res.error ) {
+                  console.log(res);
+                  console.log("exiting");
+                  process.exit(1);
+               }
 
-           datastore = res.datastore;
-           datastore_str = JSON.stringify(res);
+               datastore = res.datastore;
+               datastore_str = JSON.stringify(res);
+           }
 
            return datastorePutFile(datastore_str, 'file1', "hello world");
 
@@ -726,7 +753,7 @@ else if( command == 'unittest_write' ) {
       console.log(`private key is ${privkey_hex}`);
    }
 
-   do_unit_tests_write(blockchain_id, privkey_hex, false)
+   do_unit_tests_write(blockchain_id, privkey_hex, false, false)
    .then((result) => {
       process.exit(0);
    })
