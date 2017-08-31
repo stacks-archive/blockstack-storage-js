@@ -287,15 +287,17 @@ export function datastoreDelete(ds=null, ds_tombstones=null, root_tombstones=nul
  * Are we in single-reader storage?
  * i.e. does this device's session token own this datastore?
  */
-function isSingleReaderMount(sessionToken, datastore_id) {
-   const blockchain_id = getSessionBlockchainID(sessionToken);
+function isSingleReaderMount(sessionToken, datastore_id, blockchain_id=null) {
+   if (!blockchain_id) {
+       blockchain_id = getSessionBlockchainID(sessionToken);
+   }
 
    if (!blockchain_id) {
       // no blockchain ID given means we can't be in multi-reader storage mode
       return true;
    }
 
-   if (datastore_id === sessionToken.app_user_id) {
+   if (datastore_id === jsontokens.decodeToken(sessionToken).payload.app_user_id) {
       // the session token indicates that the datastore we're mounting was, in fact,
       // created by this device.  We can use datastore IDs and device IDs.
       return true;
@@ -440,11 +442,17 @@ export function datastoreMount(opts) {
 
    api_endpoint = session.api_endpoint;
 
-   if (isSingleReaderMount(sessionToken, candidate_datastore_id)) {
+   if (isSingleReaderMount(sessionToken, candidate_datastore_id, blockchain_id)) {
 
       // single-reader info
-      datastore_blockchain_id = null;
+      datastore_blockchain_id = (blockchain_id ? blockchain_id : session_blockchain_id);
+      if (!datastore_blockchain_id) {
+         datastore_blockchain_id = null;
+      }
+
       datastore_id = candidate_datastore_id;
+
+      console.log(`Single-reader/writer mount of ${datastore_id}`);
    }
    else {
 
@@ -456,6 +464,8 @@ export function datastoreMount(opts) {
 
       datastore_blockchain_id = (blockchain_id ? blockchain_id : session_blockchain_id);
       datastore_id = null;
+
+      console.log(`Multi-reader mount of ${datastore_blockchain_id}/${app_name}`);
    }
 
    assert((datastore_blockchain_id && app_name) || (datastore_id), `Need either blockchain_id (${datastore_blockchain_id}) / app_name (${app_name}) or datastore_id (${datastore_id})`);
