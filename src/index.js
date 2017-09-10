@@ -13,6 +13,7 @@ export * from './errors';
 export {
    datastoreGetId,
    datastoreMountOrCreate,
+   datastoreCreateSetRetry,
    datastoreMount,
    datastoreDelete,
 } from './datastore';
