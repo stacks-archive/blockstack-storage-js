@@ -1,6 +1,6 @@
 {
   "name": "blockstack-storage",
-  "version": "0.2.8",
+  "version": "0.3.0",
   "description": "The Blockstack Javascript library for storage.",
   "main": "lib/index",
   "scripts": {
@@ -9,6 +9,7 @@
     "compile-tests": "rm -rf tests/storageTests/lib; babel --presets es2015 tests/storageTests/src -d tests/storageTests/lib",
     "prepare": "npm run compile",
     "release": "npm version patch && npm publish",
+    "build": "npm run dev-build",
     "dev-build": "npm run compile; npm run compile-tests; npm run browserify;",
     "integration-test-storage": "npm run compile; npm run compile-tests; npm run browserify; node ./tests/storageTests/lib/index.js",
     "test": "echo 'Use the integration test framework; see circle.yml'; echo 'success!'"
