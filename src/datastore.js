@@ -54,11 +54,15 @@ import {
 
 import {
    jsonStableSerialize,
-   decodePrivateKey,
-   decompressPublicKey,
-   getPubkeyHex,
    splitHostPort
 } from './util';
+
+
+import {
+   decodePrivateKey,
+   decompressPublicKey,
+   getPubkeyHex
+} from 'blockstack';
 
 
 import {
@@ -70,6 +74,8 @@ import {
    getUserData,
    setUserData,
    setCachedMountContext,
+   getGaiaLocalData,
+   setGaiaLocalData
 } from './metadata';
 
 
@@ -157,7 +163,7 @@ export function datastoreCreateRequest(ds_type, ds_private_key_hex, drivers, dev
  * Asynchronous; returns a Promise that resolves to either {'status': true} (on success)
  * or {'error': ...} (on error)
  */
-export function datastoreCreate( blockstack_hostport, blockstack_session_token, datastore_request) {
+export function datastoreCreate( blockstack_hostport, blockstack_session_token, datastore_request, datastore_pubkey=null, apiPassword=null) {
 
    const payload = {
       'datastore_info': {
@@ -177,17 +183,103 @@ export function datastoreCreate( blockstack_hostport, blockstack_session_token, 
       'method': 'POST',
       'host': hostinfo.host,
       'port': hostinfo.port,
-      'path': '/v1/stores'
+      'path': '/v1/stores',
    };
 
-   options['headers'] = {'Authorization': `bearer ${blockstack_session_token}`};
+   if (apiPassword) {
+      assert(datastore_pubkey, 'Need datastore public key for password-based datastore creation');
+
+      options['path'] += `?datastore_pubkey=${datastore_pubkey}`;
+      options['headers'] = {'Authorization': `bearer ${apiPassword}`};
+   }
+   else {
+      options['headers'] = {'Authorization': `bearer ${blockstack_session_token}`};
+   }
 
    const body = JSON.stringify(payload);
    options['headers']['Content-Type'] = 'application/json';
-   options['headers']['Content-Length'] = body.length;
+   options['headers']['Content-Length'] = new Buffer(body).length;
 
-   return httpRequest(options, SUCCESS_FAIL_SCHEMA, body);
+   return httpRequest(options, PUT_DATASTORE_RESPONSE, body);
 }
+
+
+/*
+ * Did we partially succeed to create the datastore indicated by the session token?
+ * Return true if so; false if not.
+ */
+export function datastoreCreateIsPartialFailure(sessionToken) {
+   const session_app_name = getSessionAppName(sessionToken);
+   const session = jsontokens.decodeToken(sessionToken).payload;
+   const blockchain_id = getBlockchainIDFromSessionOrDefault(session);
+  
+   const gaia_state = getGaiaLocalData();
+   const marker = `${blockchain_id}/${session_app_name}`;
+
+   if (!gaia_state.partial_create_failures) {
+      return false;
+   }
+
+   if (gaia_state.partial_create_failures[marker]) {
+      return true;
+   }
+
+   return false;
+}
+
+
+/*
+ * Remember that we failed to create this datastore, and that
+ * a subsequent datastoreCreate() should succeed.
+ */
+export function datastoreCreateSetPartialFailure(sessionToken) {
+   const session_app_name = getSessionAppName(sessionToken);
+   const session = jsontokens.decodeToken(sessionToken).payload;
+   const blockchain_id = getBlockchainIDFromSessionOrDefault(session);
+
+   let gaia_state = getGaiaLocalData();
+   const marker = `${blockchain_id}/${session_app_name}`;
+
+   if (!gaia_state.partial_create_failures) {
+      gaia_state.partial_create_failures = {};
+   }
+
+   gaia_state.partial_create_failures[marker] = true;
+
+   setGaiaLocalData(gaia_state);
+}
+
+
+/*
+ * This is the "public" version of datastoreCreateSetPartialFailure
+ * that clients should call
+ */
+export function datastoreCreateSetRetry(sessionToken) {
+   return datastoreCreateSetPartialFailure(sessionToken);
+}
+
+
+/*
+ * Remember that we succeeded to create this datastore, and that
+ * a subsequent datastoreCreate() should fail.
+ */
+export function datastoreCreateUnsetPartialFailure(sessionToken) {
+   const session_app_name = getSessionAppName(sessionToken);
+   const session = jsontokens.decodeToken(sessionToken).payload;
+   const blockchain_id = getBlockchainIDFromSessionOrDefault(session);
+
+   let gaia_state = getGaiaLocalData();
+   const marker = `${blockchain_id}/${session_app_name}`;
+
+   if (!gaia_state.partial_create_failures) {
+      gaia_state.partial_create_failures = {};
+   }
+
+   gaia_state.partial_create_failures[marker] = false;
+
+   setGaiaLocalData(gaia_state);
+}
+
 
 
 /*
@@ -245,7 +337,7 @@ export function datastoreDelete(ds=null, ds_tombstones=null, root_tombstones=nul
 
    if (!ds) {
       const session = jsontokens.decodeToken(getSessionToken()).payload;
-      const blockchain_id = getSessionBlockchainIDOrDefault(session);
+      const blockchain_id = getBlockchainIDFromSessionOrDefault(session);
       assert(blockchain_id);
 
       const app_name = getSessionAppName();
@@ -277,7 +369,7 @@ export function datastoreDelete(ds=null, ds_tombstones=null, root_tombstones=nul
 
    const body = JSON.stringify(payload);
    options['headers']['Content-Type'] = 'application/json';
-   options['headers']['Content-Length'] = body.length;
+   options['headers']['Content-Length'] = new Buffer(body).length;
 
    return httpRequest(options, SUCCESS_FAIL_SCHEMA, body);
 }
@@ -318,7 +410,7 @@ export function datastoreRequestPathInfo(dsctx) {
 
    assert( (dsctx.blockchain_id && dsctx.app_name) || (dsctx.datastore_id) );
 
-   if (!dsctx.blockchain_id && !dsctx.app_name) {
+   if (dsctx.datastore_id) {
 
       // single-reader mode
       let device_ids = [];
@@ -381,6 +473,8 @@ export function datastoreRequestPathInfo(dsctx) {
  * * dataPubkeys from session.app_public_keys
  * * deviceID from session.device_id
  *
+ * Uses opts.apiPassword for authentication if given.
+ *
  * Returns a Promise that resolves to a datastore connection,
  * with the following properties:
  *      .host: blockstack host
@@ -422,6 +516,13 @@ export function datastoreMount(opts) {
    // will be set on multi-reader mount
    let datastore_blockchain_id = null;
 
+   // did we try to create this before, but failed part-way through?
+   if (datastoreCreateIsPartialFailure(sessionToken)) {
+      // technically does not exist yet.
+      console.log('Will not mount datastore due to previous partial failure');
+      return new Promise((resolve, reject) => { resolve(null); });
+   }
+
    // maybe cached?
    if (!no_cache) {
        let ds = getCachedMountContext(getBlockchainIDFromSessionOrDefault(session), session_app_name);
@@ -460,6 +561,7 @@ export function datastoreMount(opts) {
       assert(app_name || session, 'Need either appName or sessionToken in opts');
       if (!app_name && session) {
           app_name = getSessionAppName(sessionToken);
+          assert(app_name, `Invalid session token ${sessionToken}`);
       }
 
       datastore_blockchain_id = (blockchain_id ? blockchain_id : session_blockchain_id);
@@ -496,6 +598,7 @@ export function datastoreMount(opts) {
       'device_id': this_device_id,
       'datastore': null,
       'privkey_hex': null,
+      'created': false,
    };
 
    if (data_privkey_hex) {
@@ -503,6 +606,8 @@ export function datastoreMount(opts) {
    }
 
    const path_info = datastoreRequestPathInfo(ctx);
+   assert(path_info.store_id, `BUG: no store ID deduced from ${JSON.stringify(ctx)}`);
+
    const options = {
       'method': 'GET',
       'host': path_info.host,
@@ -511,7 +616,16 @@ export function datastoreMount(opts) {
    }
 
    console.log(`Mount datastore ${options.path}`);
-   options['headers'] = {'Authorization': `bearer ${sessionToken}`};
+
+   if (opts.apiPassword && data_privkey_hex) {
+      options['headers'] = {'Authorization': `bearer ${opts.apiPassword}`};
+
+      // need to explicitly pass the datastore public key 
+      options['path'] += `&datastore_pubkey=${getPubkeyHex(data_privkey_hex)}`;
+   }
+   else {
+      options['headers'] = {'Authorization': `bearer ${sessionToken}`};
+   }
 
    return httpRequest(options, DATASTORE_RESPONSE_SCHEMA).then((ds) => {
       if (!ds || ds.error) {
@@ -552,11 +666,13 @@ export function datastoreMount(opts) {
  * Connect to or create a datastore.
  * Asynchronous, returns a Promise
  *
- * Returns a Promise that yields a datastore connection.
+ * Returns a Promise that yields a datastore connection context.
+ * If we created this datastore, then .urls = {'datastore': [...], 'root': [...]} will be defined in the returned context.
+ *
  * Throws on error.
  *
  */
-export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local': 1}, sessionToken=null, appPrivateKey=null) {
+export function datastoreMountOrCreate(replication_strategy={'publish': 1, 'local': 1}, sessionToken=null, appPrivateKey=null, apiPassword=null) {
 
    if(!sessionToken) {
       const userData = getUserData();
@@ -570,9 +686,9 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
    const session_blockchain_id = getBlockchainIDFromSessionOrDefault(session);
    const session_app_name = getSessionAppName(sessionToken);
 
-   // cached?
+   // cached, and not partially-failed create?
    let ds = getCachedMountContext(session_blockchain_id, session_app_name);
-   if (ds) {
+   if (ds && !datastoreCreateIsPartialFailure(sessionToken)) {
       return new Promise((resolve, reject) => { resolve(ds); });
    }
 
@@ -585,34 +701,25 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
       assert(appPrivateKey);
    }
 
-   // sanity check
-   for (let strategy of Object.keys(replication_strategy)) {
-      let supported = false;
-      for (let supported_strategy of Object.keys(REPLICATION_STRATEGY_CLASSES)) {
-         if (supported_strategy === strategy) {
-            supported = true;
-            break;
-         }
-      }
-
-      if (!supported) {
-         throw new Error(`Unsupported replication strategy ${strategy}`);
-      }
-   }
-
    let drivers = null;
    let app_name = getSessionAppName(sessionToken);
 
    // find satisfactory storage drivers
-   if (Object.keys(session.storage.preferences).includes(app_name)) {
+   if (replication_strategy.drivers) {
 
-      // app-specific preference
-      drivers = session.storage.preferences[app_name];
+      drivers = replication_strategy.drivers;
    }
    else {
+       if (Object.keys(session.storage.preferences).includes(app_name)) {
 
-      // select defaults given the replication strategy
-      drivers = selectDrivers(replication_strategy, session.storage.classes);
+          // app-specific preference
+          drivers = session.storage.preferences[app_name];
+       }
+       else {
+
+          // select defaults given the replication strategy
+          drivers = selectDrivers(replication_strategy, session.storage.classes);
+       }
    }
 
    let api_endpoint = session.api_endpoint;
@@ -641,6 +748,7 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
    const datastoreOpts = {
       'appPrivateKey': appPrivateKey,
       'sessionToken': sessionToken,
+      'apiPassword': apiPassword,
    };
 
    return datastoreMount(datastoreOpts)
@@ -652,7 +760,7 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
          const info = datastoreCreateRequest('datastore', appPrivateKey, drivers, deviceID, allDeviceIDs);
 
          // go create it
-         return datastoreCreate(hostport, sessionToken, info)
+         return datastoreCreate(hostport, sessionToken, info, getPubkeyHex(appPrivateKey), apiPassword)
          .then((res) => {
             if (res.error) {
                console.log(res.error);
@@ -661,8 +769,25 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
                throw new Error(`Failed to create datastore (errno ${errorNo}): ${errorMsg}`);
             }
 
+            assert(res.root_urls, 'Missing root URLs');
+            assert(res.datastore_urls, 'Missing datastore URLs');
+
+            // this create succeeded
+            datastoreCreateUnsetPartialFailure(sessionToken);
+
             // connect to it now
-            return datastoreMount(datastoreOpts);
+            return datastoreMount(datastoreOpts)
+            .then((datastore_ctx) => {
+               
+                // return URLs as well 
+                datastore_ctx.urls = {
+                   root: res.root_urls,
+                   datastore: res.datastore_urls,
+                };
+                datastore_ctx.created = true;
+
+                return datastore_ctx;
+            });
          });
       }
       else if (datastore_ctx.error) {
