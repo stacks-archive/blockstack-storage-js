@@ -1,6 +1,6 @@
 #!/bin/sh
 
-BLOCKSTACK_BRANCH="rc-0.14.3"
+BLOCKSTACK_BRANCH="master"
 BLOCKSTACK_JS_BRANCH="master"
 
 # get bitcoind
@@ -52,5 +52,5 @@ sudo ln -s "$(npm config get prefix)"/lib/node_modules/blockstack /usr/lib/node_
 sudo ln -s "$(npm config get prefix)"/lib/node_modules/blockstack-storage /usr/lib/node_modules/blockstack-storage
 
 # run the relevant integration tests
-blockstack-test-scenario blockstack_integration_tests.scenarios.name_preorder_register_portal_auth || exit 1
-blockstack-test-scenario blockstack_integration_tests.scenarios.name_preorder_register_portal_datastore || exit 1
+blockstack-test-scenario blockstack_integration_tests.scenarios.name_pre_reg_portal_auth || exit 1
+blockstack-test-scenario blockstack_integration_tests.scenarios.name_pre_reg_portal_datastore || exit 1
