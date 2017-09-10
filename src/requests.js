@@ -62,18 +62,38 @@ function validateJSONResponse(resp, result_schema) {
  * Throws on server-side error
  */
 export function httpRequest(options, result_schema, body) {
-
-    if (body) {
-       options['body'] = body;
-    }
+    
+    assert(options['method'], 'No method');
+    assert(options['host'], 'No host');
+    assert(options['port'], 'No port');
+    assert(options['path'], 'No path');
 
     if (!options['headers']) {
        options['headers'] = {};
     }
+    
+    if (!options['scheme']) {
+       options['scheme'] = 'http';
+    }
 
-    options['headers']['Origin'] = 'http://localhost:8888'
+    if (body) {
+       assert(options['headers']['Content-Type'], 'No content-type');
+       options['body'] = body;
+       options['headers']['Accept'] = '*/*';
+    }
 
-    const url = `http://${options.host}:${options.port}${options.path}`;
+    options['headers']['Origin'] = 'http://localhost:8888';
+
+    // extract URL
+    const url = `${options.scheme}://${options.host}:${options.port}${options.path}`;
+    delete options['scheme'];
+    delete options['host'];
+    delete options['port'];
+    delete options['path'];
+
+    console.log(url);
+    console.log(JSON.stringify(options));
+
     return fetch(url, options)
     .then((response) => {
 
@@ -107,7 +127,11 @@ export function httpRequest(options, result_schema, body) {
         else {
            return response.text();
         }
-    });
+    })
+   .catch((error) => {
+      console.log(`Failed to fetch ${url}: ${error}`);
+      throw error;
+   });
 }
 
 
