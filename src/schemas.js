@@ -187,10 +187,18 @@ export const PUT_DATASTORE_RESPONSE = {
                 pattern:  OP_URI_TARGET_PATTERN
             },
         },
+        root_urls: {
+            type: 'array',
+            items: {
+                type: 'string',
+                pattern: OP_URI_TARGET_PATTERN
+            },
+        },
     },
     required:  [
         'status',
         'datastore_urls',
+        'root_urls',
     ],
 }
 
