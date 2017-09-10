@@ -19,6 +19,7 @@ import {
 import {
    datastoreGetId,
    decodePrivateKey,
+   datastoreCreateSetRetry
 } from '../../../lib/';
 
 import {
@@ -379,10 +380,50 @@ function do_unit_tests_write( blockchain_id, privkey=null, create_datastore=true
       .then((res) => {
 
            if (create_datastore) {
+               console.log(`getOrCreateDatastore (create) result: ${JSON.stringify(res)}`);
+           }
+           else {
+               console.log(`getDatastore result: ${JSON.stringify(res)}`);
+           }
+
+           if( !res || res.error ) {
+              console.log(res);
+              process.exit(1);
+           }
+
+           if (create_datastore) {
+               // must have been idempotent 
+               if (res.created) {
+                  console.log(res);
+                  console.log('accidentally recreated datastore');
+                  process.exit(1);
+               }
+
+               // make sure we can recreate it 
+               datastoreCreateSetRetry(session_token);
+               return getOrCreateDatastore({'local': 1}, session_token, datastore_privkey_hex);
+           }
+           else {
+               datastore = res.datastore;
+               datastore_str = JSON.stringify(res);
+               return true;
+           }
+
+      }, (error) => {console.log(`get/create datastore (create=${create_datastore}) failed:`); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      .then((res) => {
+
+           if (create_datastore) {
                console.log(`getOrCreateDatastore (get) result: ${JSON.stringify(res)}`);
                if( !res || res.error ) {
                   console.log(res);
                   console.log("exiting");
+                  process.exit(1);
+               }
+
+               // make sure it was created
+               if (!res.created) {
+                  console.log(res);
+                  console.log('did not recreate datastore as expected');
                   process.exit(1);
                }
 
@@ -392,7 +433,7 @@ function do_unit_tests_write( blockchain_id, privkey=null, create_datastore=true
 
            return datastorePutFile(datastore_str, 'file1', "hello world");
 
-      }, (error) => {console.log("getOrCreateDatastore failed:"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
+      }, (error) => {console.log("getOrCreateDatastore failed (forced recreate):"); console.log(error); console.log(JSON.stringify(error)); process.exit(1);})
       .then((res) => {
 
            console.log(`datastorePutFile result: ${JSON.stringify(res)}`);
