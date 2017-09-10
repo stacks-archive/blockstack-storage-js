@@ -33,8 +33,12 @@ import {
 
 import {
    jsonStableSerialize,
-   decompressPublicKey,
 } from './util';
+
+import {
+   decompressPublicKey,
+   getPubkeyHex
+} from 'blockstack';
 
 import {
    datastoreMount,
