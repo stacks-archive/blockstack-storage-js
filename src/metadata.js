@@ -1,6 +1,7 @@
 'use strict'
 
 const LOCAL_STORAGE_ID = 'blockstack';
+const LOCAL_STORAGE_GAIA_ID = 'blockstack-gaia';
 
 const urlparse = require('url');
 const crypto = require('crypto');
@@ -16,18 +17,6 @@ import {
  * Get a reference to our localStorage implementation
  */
 function getLocalStorage() {
-   // uncomment when testing locally.  Make sure node-localstorage is installed!
-   /*
-   let localStorage = null;
-    
-   if (typeof window === 'undefined' || window === null) {
-      const LocalStorage = require('node-localstorage').LocalStorage;
-      localStorage = new LocalStorage('./scratch');
-   }
-   else {
-      localStorage = window.localStorage;
-   }
-   */
    return localStorage;
 }
 
@@ -40,6 +29,23 @@ export function getUserData() {
 
    const localStorage = getLocalStorage();
    let userData = localStorage.getItem(LOCAL_STORAGE_ID);
+   if (userData === null || typeof(userData) === 'undefined') {
+      userData = '{}';
+   }
+
+   userData = JSON.parse(userData);
+   return userData;
+}
+
+
+/*
+ * Get Gaia-specific local data
+ * Throws on error
+ */
+export function getGaiaLocalData() {
+   
+   const localStorage = getLocalStorage();
+   let userData = localStorage.getItem(LOCAL_STORAGE_GAIA_ID);
    if (userData === null || typeof(userData) === 'undefined') {
       userData = '{}';
    }
@@ -69,6 +75,15 @@ export function setUserData(userData) {
    
    localStorage.setItem(LOCAL_STORAGE_ID, JSON.stringify(userData));
 }
+
+
+/*
+ * Save local Gaia state
+ */
+export function setGaiaLocalData(userData) {
+   localStorage.setItem(LOCAL_STORAGE_GAIA_ID, JSON.stringify(userData));
+}
+
 
 /*
  * Get a cached app-specific datastore mount context for a given blockchain ID and application
@@ -109,6 +124,7 @@ export function getCachedMountContext(blockchain_id, full_app_name) {
  * Cache a mount context for a blockchain ID
  *
  * @param blockchain_id (string) the blockchain ID
+ * @param full_app_name (string) the fully-qualified application name
  * @param datastore_context (object) the datastore mount context
  */
 export function setCachedMountContext(blockchain_id, full_app_name, datastore_context) {
@@ -124,9 +140,35 @@ export function setCachedMountContext(blockchain_id, full_app_name, datastore_co
    }
 
    let cache_key = `${blockchain_id}/${full_app_name}`
-   console.log(`Cache datastore for ${blockchain_id} in ${full_app_name}`);
-
    userData.datastore_contexts[cache_key] = datastore_context;
+   setUserData(userData);
+}
+
+
+/*
+ * Uncache a mount context for a blockchain ID
+ *
+ * @param blockchain_id (string) the blockchain ID
+ * @param full_app_name (string) the fully-qualified application name
+ */
+export function deleteCachedMountContext(blockchain_id, full_app_name) {
+
+   let userData = getUserData();
+   assert(userData);
+
+   assert(blockchain_id, 'No blockchain ID given');
+   assert(full_app_name, 'No app name given');
+
+   if (!userData.datastore_contexts) {
+      return true;
+   }
+
+   let cache_key = `${blockchain_id}/${full_app_name}`
+   if (!Objects.keys(userData.datastore_contexts).includes(cache_key)) {
+      return true;
+   }
+
+   delete userData.datastore_contexts[cache_key];
    setUserData(userData);
 }
 
@@ -188,8 +230,19 @@ export function getSessionAppName(sessionToken=null) {
    }
 
    const session = jsontokens.decodeToken(sessionToken).payload;
-   return urlparse.parse(session.app_domain).host;
+   assert(session.app_domain, `Missing app_domain in session ${sessionToken}`);
+
+   let domainName = session.app_domain;
+   const urlInfo = urlparse.parse(domainName);
+   if (!urlInfo.protocol) {
+      domainName = `http://${domainName}`;
+   }
+
+   const appname = urlparse.parse(domainName).host;
+   assert(appname, `Unparseable app_domain in session ${sessionToken}`);
+   return appname;
 }
+
 
 /*
  * Get the session's device ID 
