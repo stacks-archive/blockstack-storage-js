@@ -1,7 +1,5 @@
 'use strict'
 
-const bitcoinjs = require('bitcoinjs-lib');
-const BigInteger = require('bigi');
 const crypto = require('crypto');
 
 /*
@@ -29,44 +27,6 @@ export function splitHostPort(hostport) {
 
 
 /*
- * Get a *uncompressed* public key (hex) from private key
- */
-export function getPubkeyHex(privkey_hex) {
-   let privkey = BigInteger.fromBuffer( decodePrivateKey(privkey_hex) );
-   let public_key = new bitcoinjs.ECPair(privkey);
-   const public_key_str = decompressPublicKey(public_key.getPublicKeyBuffer().toString('hex'));
-   return public_key_str;
-}
-
-
-/* 
- * Get the address of a public key
- *
- * @param pubkey_hex: the public key as a hex string
- */
-export function publicKeyToAddress(pubkey_hex) {
-    let ec = bitcoinjs.ECPair.fromPublicKeyBuffer( Buffer.from(pubkey_hex, 'hex') );
-    return ec.getAddress();
-}
-
-
-/*
- * Convert a public key to its uncompressed format
- *
- * @param pubkey (string) the public key as a hex string
- *
- * Returns a string that encodes the uncompressed public key
- */
-export function decompressPublicKey(pubkey_hex) {
-   let pubk = bitcoinjs.ECPair.fromPublicKeyBuffer( Buffer.from(pubkey_hex, 'hex') );
-   pubk.compressed = false;
-   
-   const public_key_str = pubk.getPublicKeyBuffer().toString('hex');
-   return public_key_str;
-}
-
-
-/*
  * Hash raw data
  * @param payload_buffer (Buffer) the buffer to hash
  *
@@ -78,39 +38,6 @@ export function hashRawData( payload_buffer ) {
    hash.update(payload_buffer);
    
    return hash.digest('hex');
-}
-
-
-/*
- * Decode a hex string into a byte buffer.
- *
- * @param hex (String) a string of hex digits.
- *
- * Returns a buffer with the raw bytes
- */
-export function decodeHexString( hex ) {
-    const bytes = [];
-    for(let i=0; i< hex.length-1; i+=2) {
-        bytes.push(parseInt(hex.substr(i, 2), 16));
-    }
-    return Buffer.from(bytes)
-}
-
-
-/*
- * Decode an ECDSA private key into a byte buffer
- * (compatible with Bitcoin's 'compressed' flag quirk)
- *
- * @param privkey_hex (String) a hex-encoded ECDSA private key on secp256k1; optionally ending in '01'
- *
- * Returns a Buffer with the private key data
- */
-export function decodePrivateKey( privatekey_hex ) {
-   if( privatekey_hex.length === 66 && privatekey_hex.slice(64, 66) === '01' ) {
-       // truncate the '01', which is a hint to Bitcoin to expect a compressed public key
-       privatekey_hex = privatekey_hex.slice(0, 64);
-   }
-   return decodeHexString(privatekey_hex);
 }
 
 
