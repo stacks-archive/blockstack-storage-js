@@ -1,9 +1,13 @@
 'use strict';
 
 import {
-   hashRawData,
-   decodePrivateKey
+   hashRawData
 } from './util';
+
+import {
+   decodePrivateKey,
+   makeFullyQualifiedDataId
+} from 'blockstack';
 
 const assert = require('assert');
 const crypto = require('crypto');
@@ -95,20 +99,6 @@ export function signRawData( payload_buffer, privkey_hex, hash ) {
  */
 export function signDataPayload( payload_string, privkey_hex ) {
    return signRawData( Buffer.concat( [Buffer.from(`${payload_string.length}:`), Buffer.from(payload_string), Buffer.from(',')] ), privkey_hex );
-}
-
-
-/*
- * Make a fully-qualified data ID (i.e. includes the device ID)
- * equivalent to this in Python: urllib.quote(str('{}:{}'.format(device_id, data_id).replace('/', '\\x2f')))
- * 
- * @param device_id (String) the device ID 
- * @param data_id (String) the device-agnostic part of the data ID
- *
- * Returns the fully-qualified data ID
- */
-export function makeFullyQualifiedDataId( device_id, data_id ) {
-   return escape(`${device_id}:${data_id}`.replace('/', '\\x2f'));
 }
 
 
