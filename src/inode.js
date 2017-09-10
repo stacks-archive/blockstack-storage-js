@@ -10,9 +10,12 @@ import {
 
 import {
    makeDataInfo,
-   makeFullyQualifiedDataId,
 } from './blob';
 
+import {
+   publicKeyToAddress,
+   makeFullyQualifiedDataId
+} from 'blockstack';
 
 const assert = require('assert');
 const crypto = require('crypto');
@@ -30,7 +33,7 @@ const BLOCKSTACK_STORAGE_PROTO_VERSION = 1;
  *
  * @param datastore_id (string) the datastore ID
  * @param reader_pubkeys (array) the list of reader public keys
- * @timestamp (int) the number of milliseconds since the epoch
+ * @param timestamp (int) the number of milliseconds since the epoch
  *
  * Returns a new device root directory page
  */
