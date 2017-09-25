@@ -769,7 +769,7 @@ function findDatastoreInfo(this_device_id, opts) {
  * Returns a Promise that resolves to the data, or null if not found.
  * Throws an exception on network or storage errors
  */
-export function getFile(file_name, opts) {
+export function getFile(file_name, opts = {}) {
    const blockchain_id = opts.blockchainID || getSessionBlockchainID();
    const app_name = getSessionAppName();
    const force = opts.force || false;
@@ -789,7 +789,7 @@ export function getFile(file_name, opts) {
  *
  * Returns a promise that resolves to file URLs
  */
-export function putFile(file_name, file_buffer, opts) {
+export function putFile(file_name, file_buffer, opts = {}) {
 
    const blockchain_id = getSessionBlockchainID();
    const app_name = getSessionAppName();
