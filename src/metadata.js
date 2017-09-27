@@ -221,6 +221,20 @@ export function getSessionBlockchainID(sessionToken=null) {
 
 
 /*
+ * Get the current session's datastore ID 
+ */
+export function getSessionDatastoreID(sessionToken=null) {
+
+   if (!sessionToken) {
+      sessionToken = getSessionToken();
+   }
+
+   const session = jsontokens.decodeToken(sessionToken).payload;
+   return session.app_user_id;
+}
+
+
+/*
  * Get the fully-qualified application name from the session
  */
 export function getSessionAppName(sessionToken=null) {
