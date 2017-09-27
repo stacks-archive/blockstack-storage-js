@@ -248,7 +248,7 @@ export function getSessionAppName(sessionToken=null) {
 
    let domainName = session.app_domain;
    const urlInfo = urlparse.parse(domainName);
-   if (!urlInfo.protocol) {
+   if (!urlInfo.slashes) {
       domainName = `http://${domainName}`;
    }
 
@@ -259,7 +259,7 @@ export function getSessionAppName(sessionToken=null) {
 
 
 /*
- * Get the session's device ID 
+ * Get the session's device ID
  */
 export function getSessionDeviceID(sessionToken=null) {
 

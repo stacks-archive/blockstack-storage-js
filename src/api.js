@@ -1,4 +1,4 @@
-'use strict'    
+'use strict'
 
 import {
    CORE_ERROR_SCHEMA,
@@ -72,7 +72,6 @@ const BigInteger = require('bigi');
 const Promise = require('promise');
 const jsontokens = require('jsontokens');
 const urlparse = require('url');
-
 
 /*
  * Get the device-specific root directory page
@@ -770,7 +769,7 @@ function findDatastoreInfo(this_device_id, opts) {
  * Returns a Promise that resolves to the data, or null if not found.
  * Throws an exception on network or storage errors
  */
-export function getFile(file_name, opts) {
+export function getFile(file_name, opts = {}) {
    const blockchain_id = opts.blockchainID || getSessionBlockchainID();
    const app_name = getSessionAppName();
    const datastore_id = getSessionDatastoreID();
@@ -791,7 +790,7 @@ export function getFile(file_name, opts) {
  *
  * Returns a promise that resolves to file URLs
  */
-export function putFile(file_name, file_buffer, opts) {
+export function putFile(file_name, file_buffer, opts = {}) {
 
    const blockchain_id = getSessionBlockchainID();
    const app_name = getSessionAppName();
@@ -830,7 +829,7 @@ export function putFile(file_name, file_buffer, opts) {
          const device_root = root_info['device_root'];
           
          // serialize 
-         const file_payload_b64 = file_buffer.toString("base64");
+         const file_payload_b64 = Buffer(file_buffer).toString("base64");
          const file_hash = hashDataPayload(file_buffer.toString());
 
          // make file header blob
