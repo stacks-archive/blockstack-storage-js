@@ -60,6 +60,7 @@ import {
    getSessionDeviceID,
    getDeviceRootVersion,
    putDeviceRootVersion,
+   getSessionDatastoreID
 } from './metadata';
 
 const assert = require('assert');
@@ -89,7 +90,7 @@ function getDeviceRoot(device_id, opts) {
     
    let blockchain_id = opts.blockchain_id || null;
    let full_app_name = opts.full_app_name || null;
-   let datastore_id = opts.full_app_name || null;
+   let datastore_id = opts.datastore_id || null;
    let data_pubkeys = opts.data_pubkeys || null;
    let force = opts.force || false;
 
@@ -147,7 +148,7 @@ function getRoot(opts) {
 
    let blockchain_id = opts.blockchain_id || null;
    let full_app_name = opts.full_app_name || null;
-   let datastore_id = opts.full_app_name || null;
+   let datastore_id = opts.datastore_id || null;
    let data_pubkeys = opts.data_pubkeys || null;
    let force = opts.force || false;
 
@@ -208,7 +209,7 @@ function getFileHeader(file_name, device_id, opts) {
 
    let blockchain_id = opts.blockchain_id || null;
    let full_app_name = opts.full_app_name || null;
-   let datastore_id = opts.full_app_name || null;
+   let datastore_id = opts.datastore_id || null;
    let data_pubkeys = opts.data_pubkeys || null;
    let force = opts.force || false;
 
@@ -265,7 +266,7 @@ function getFileData(file_name, opts) {
 
    let blockchain_id = opts.blockchain_id || null;
    let full_app_name = opts.full_app_name || null;
-   let datastore_id = opts.full_app_name || null;
+   let datastore_id = opts.datastore_id || null;
    let data_pubkeys = opts.data_pubkeys || null;
    let force = opts.force || false;
 
@@ -772,9 +773,10 @@ function findDatastoreInfo(this_device_id, opts) {
 export function getFile(file_name, opts) {
    const blockchain_id = opts.blockchainID || getSessionBlockchainID();
    const app_name = getSessionAppName();
+   const datastore_id = getSessionDatastoreID();
    const force = opts.force || false;
 
-   return getFileData(file_name, {'blockchain_id': blockchain_id, 'full_app_name': app_name, 'force': force});
+   return getFileData(file_name, {'blockchain_id': blockchain_id, 'datastore_id': datastore_id, 'full_app_name': app_name, 'force': force});
 }
 
 
@@ -989,9 +991,10 @@ export function deleteFile(file_name, opts) {
 export function listFiles(opts) {
    const blockchain_id = opts.blockchainID || getSessionBlockchainID();
    const app_name = getSessionAppName();
+   const datastore_id = getSessionDatastoreID();
    const force = opts.force || false;
 
-   return getRoot({'blockchain_id': blockchain_id, 'full_app_name': full_app_name, 'force': force});
+   return getRoot({'blockchain_id': blockchain_id, 'datastore_id': datastore_id, 'full_app_name': full_app_name, 'force': force});
 }
 
 
@@ -1011,10 +1014,11 @@ export function listFiles(opts) {
 export function getFileURLs(file_name, opts) {
    const blockchain_id = opts.blockchainID || getSessionBlockchainID();
    const app_name = getSessionAppName();
+   const datastore_id = getSessionDatastoreID();
    const device_id = getSessionDeviceID();
    const force = opts.force || false;
 
-   return getFileHeader(file_name, device_id, {'blockchain_id': blockchain_id, 'full_app_name': app_name, 'force': force})
+   return getFileHeader(file_name, device_id, {'blockchain_id': blockchain_id, 'datastore_id': datastore_id, 'full_app_name': app_name, 'force': force})
    .then((res) => {
       
       if (res.error || res.errno) {
