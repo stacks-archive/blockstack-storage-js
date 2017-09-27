@@ -55,10 +55,10 @@ export function selectDrivers(replication_strategy, classes) {
       // classes matches at least one concern (i.e. 'local', 'public')
       for (let concern of Object.keys(replication_strategy)) {
 
-          let matches = false;
+          let matches = true;
           for (let dclass of classes) {
-             if (REPLICATION_STRATEGY_CLASSES[concern].has(dclass)) {
-                matches = true;
+             if (!REPLICATION_STRATEGY_CLASSES[concern].has(dclass)) {
+                matches = false;
                 break;
              }
           }
