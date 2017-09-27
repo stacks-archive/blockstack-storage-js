@@ -18,7 +18,6 @@ import {
 
 import {
    datastoreGetId,
-   decodePrivateKey,
    datastoreCreateSetRetry
 } from '../../../lib/';
 
@@ -29,7 +28,8 @@ import {
 
 import {
    getCoreSession,
-   makeAuthRequest
+   makeAuthRequest,
+   decodePrivateKey
 } from "blockstack";
 
 const assert = require('assert');
@@ -790,7 +790,7 @@ else if( command == 'unittest_write' ) {
 
    if (!privkey_hex) {
       var privkey = bitcoinjs.ECPair.makeRandom();
-      privkey_hex = datastore_privkey.d.toBuffer().toString('hex');
+      privkey_hex = privkey.d.toBuffer().toString('hex');
       console.log(`private key is ${privkey_hex}`);
    }
 
