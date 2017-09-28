@@ -56,9 +56,10 @@ export function selectDrivers(replication_strategy, classes) {
       for (let concern of Object.keys(replication_strategy)) {
 
           let matches = true;
-          for (let dclass of classes) {
-             if (!REPLICATION_STRATEGY_CLASSES[concern].has(dclass)) {
+          for (let dclass of REPLICATION_STRATEGY_CLASSES[concern]) {
+             if (!classes.includes(dclass)) {
                 matches = false;
+                console.log(`Driver ${d} does not fulfill ${concern}, since it does not address class ${dclass}`);
                 break;
              }
           }
@@ -81,14 +82,19 @@ export function selectDrivers(replication_strategy, classes) {
 
           // strategy fulfilled?
           let fulfilled = true;
-          for (let concern of Object.keys(replication_strategy)) {
-             let count = 0;
-             if (concern_fulfillment[concern]) {
-                count = concern_fulfillment[concern];
-             }
+          for (let sclass of Object.keys(replication_strategy)) {
+             for (let concern of Object.keys(replication_strategy[sclass])) {
+                 let count = 0;
+                 if (concern_fulfillment[concern]) {
+                    count = concern_fulfillment[concern];
+                 }
 
-             if (count < replication_strategy[concern]) {
-                fulfilled = false;
+                 if (count < replication_strategy[concern]) {
+                    fulfilled = false;
+                    break;
+                 }
+             }
+             if (!fulfilled) {
                 break;
              }
           }
