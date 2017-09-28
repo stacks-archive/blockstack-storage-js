@@ -75,7 +75,8 @@ import {
    setUserData,
    setCachedMountContext,
    getGaiaLocalData,
-   setGaiaLocalData
+   setGaiaLocalData,
+   getSessionDatastoreID,
 } from './metadata';
 
 
@@ -292,13 +293,13 @@ export function datastoreCreateUnsetPartialFailure(sessionToken) {
 export function datastoreDeleteRequest(ds=null) {
 
    if (!ds) {
-      const blockchain_id = getSessionBlockchainID();
-      assert(blockchain_id);
-
       const app_name = getSessionAppName();
       assert(app_name);
 
-      ds = getCachedMountContext(blockchain_id, app_name);
+      const datastore_id = getSessionDatastoreID();
+      assert(datastore_id);
+
+      ds = getCachedMountContext(datastore_id, app_name);
       assert(ds);
    }
 
@@ -337,13 +338,14 @@ export function datastoreDelete(ds=null, ds_tombstones=null, root_tombstones=nul
 
    if (!ds) {
       const session = jsontokens.decodeToken(getSessionToken()).payload;
-      const blockchain_id = getBlockchainIDFromSessionOrDefault(session);
-      assert(blockchain_id);
 
       const app_name = getSessionAppName();
       assert(app_name);
 
-      ds = getCachedMountContext(blockchain_id, app_name);
+      const datastore_id = getSessionDatastoreID();
+      assert(datastore_id);
+
+      ds = getCachedMountContext(datastore_id, app_name);
       assert(ds);
    }
 
@@ -486,35 +488,41 @@ export function datastoreRequestPathInfo(dsctx) {
  */
 export function datastoreMount(opts) {
 
-   let data_privkey_hex = opts.appPrivateKey;
    const no_cache = opts.noCachedMounts;
 
    let sessionToken = opts.sessionToken;
    let blockchain_id = opts.blockchainID;
    let app_name = opts.appName;
-   let candidate_datastore_id = opts.datastoreID;
    let this_device_id = opts.deviceID;
    let app_public_keys = opts.dataPubkeys;
-
-   let session_blockchain_id = getSessionBlockchainID(sessionToken);
-   let api_endpoint = null;
-   if (data_privkey_hex) {
-      candidate_datastore_id = datastoreGetId(getPubkeyHex(data_privkey_hex));
-   }
-
+ 
    if (!sessionToken) {
       sessionToken = getSessionToken();
       assert(sessionToken);
    }
-      
+
+   let session_blockchain_id = getSessionBlockchainID(sessionToken);
+   let session_datastore_id = getSessionDatastoreID(sessionToken);
+   let api_endpoint = null;
+
+   if (session_blockchain_id === blockchain_id) {
+      // this is definitely single-reader
+      blockchain_id = null;
+   }
+
+   // get our app private key
+   const userData = getUserData();
+
+   let datastore_privkey_hex = userData.appPrivateKey;
+   if (!datastore_privkey_hex) {
+      // can only happen if testing 
+      datastore_privkey_hex = opts.appPrivateKey;
+   }
+
+   assert(datastore_privkey_hex);
+  
    const session = jsontokens.decodeToken(sessionToken).payload;
    const session_app_name = getSessionAppName(sessionToken);
-
-   // will be set on single-reader mount
-   let datastore_id = null;
-
-   // will be set on multi-reader mount
-   let datastore_blockchain_id = null;
 
    // did we try to create this before, but failed part-way through?
    if (datastoreCreateIsPartialFailure(sessionToken)) {
@@ -525,7 +533,10 @@ export function datastoreMount(opts) {
 
    // maybe cached?
    if (!no_cache) {
-       let ds = getCachedMountContext(getBlockchainIDFromSessionOrDefault(session), session_app_name);
+       // if this is our datastore, use our datastore ID.
+       // otherwise use the blockchain ID
+       let ds_cache_key = blockchain_id || session_datastore_id;
+       let ds = getCachedMountContext(ds_cache_key, session_app_name);
        if (ds) {
           return new Promise((resolve, reject) => { resolve(ds); });
        }
@@ -543,17 +554,9 @@ export function datastoreMount(opts) {
 
    api_endpoint = session.api_endpoint;
 
-   if (isSingleReaderMount(sessionToken, candidate_datastore_id, blockchain_id)) {
-
-      // single-reader info
-      datastore_blockchain_id = (blockchain_id ? blockchain_id : session_blockchain_id);
-      if (!datastore_blockchain_id) {
-         datastore_blockchain_id = null;
-      }
-
-      datastore_id = candidate_datastore_id;
-
-      console.log(`Single-reader/writer mount of ${datastore_id}`);
+   if (!blockchain_id) {
+      assert(session_datastore_id, 'No datastore ID in session');
+      console.log(`Single-reader/writer mount of ${session_datastore_id}`);
    }
    else {
 
@@ -564,13 +567,10 @@ export function datastoreMount(opts) {
           assert(app_name, `Invalid session token ${sessionToken}`);
       }
 
-      datastore_blockchain_id = (blockchain_id ? blockchain_id : session_blockchain_id);
-      datastore_id = null;
-
-      console.log(`Multi-reader mount of ${datastore_blockchain_id}/${app_name}`);
+      console.log(`Multi-reader mount of ${blockchain_id}/${app_name}`);
    }
 
-   assert((datastore_blockchain_id && app_name) || (datastore_id), `Need either blockchain_id (${datastore_blockchain_id}) / app_name (${app_name}) or datastore_id (${datastore_id})`);
+   assert((blockchain_id && app_name) || (session_datastore_id), `Need either blockchain_id (${blockchain_id}) / app_name (${app_name}) or datastore_id (${session_datastore_id})`);
    
    if (api_endpoint.indexOf('://') < 0) {
       let new_api_endpoint = 'https://' + api_endpoint;
@@ -591,9 +591,9 @@ export function datastoreMount(opts) {
       'scheme': scheme,
       'host': host,
       'port': port,
-      'blockchain_id': datastore_blockchain_id,
+      'blockchain_id': blockchain_id,
       'app_name': app_name,
-      'datastore_id': datastore_id,
+      'datastore_id': session_datastore_id,
       'app_public_keys': app_public_keys,
       'device_id': this_device_id,
       'datastore': null,
@@ -601,8 +601,9 @@ export function datastoreMount(opts) {
       'created': false,
    };
 
-   if (data_privkey_hex) {
-      ctx.privkey_hex = data_privkey_hex;
+   if (!blockchain_id) {
+      // this is *our* datastore
+      ctx['privkey_hex'] = datastore_privkey_hex;
    }
 
    const path_info = datastoreRequestPathInfo(ctx);
@@ -617,11 +618,11 @@ export function datastoreMount(opts) {
 
    console.log(`Mount datastore ${options.path}`);
 
-   if (opts.apiPassword && data_privkey_hex) {
+   if (opts.apiPassword && datastore_privkey_hex) {
       options['headers'] = {'Authorization': `bearer ${opts.apiPassword}`};
 
       // need to explicitly pass the datastore public key 
-      options['path'] += `&datastore_pubkey=${getPubkeyHex(data_privkey_hex)}`;
+      options['path'] += `&datastore_pubkey=${getPubkeyHex(datastore_privkey_hex)}`;
    }
    else {
       options['headers'] = {'Authorization': `bearer ${sessionToken}`};
@@ -641,21 +642,20 @@ export function datastoreMount(opts) {
       else {
          ctx['datastore'] = ds.datastore;
 
-         // this is required for testing purposes, since the core session token will not have been set
-         let userData = getUserData();
-         if (!userData.coreSessionToken && sessionToken) {
-            console.log("In test framework; saving session token");
-            userData.coreSessionToken = sessionToken;
-
-            if (data_privkey_hex) {
-                userData.appPrivateKey = data_privkey_hex;
-            }
-
-            setUserData(userData);
-         }
-
          // save
-         setCachedMountContext(getBlockchainIDFromSessionOrDefault(session), session_app_name, ctx);
+         if (!no_cache) {
+             // if this is our datastore, use the datastore ID.
+             // otherwise use the blockchain ID
+             let ds_cache_key = blockchain_id || session_datastore_id;
+             if (ds_cache_key === session_datastore_id) {
+                // this is *our* datastore.  We had better have the data key 
+                assert(datastore_privkey_hex, 'Missing data private key');
+                assert(ctx.privkey_hex, 'Missing data private key in mount context');
+             }
+
+             console.log(`Cache datastore for ${ds_cache_key}/${session_app_name}`);
+             setCachedMountContext(ds_cache_key, session_app_name, ctx);
+         }
          return ctx;
       }
    });
@@ -672,7 +672,7 @@ export function datastoreMount(opts) {
  * Throws on error.
  *
  */
-export function datastoreMountOrCreate(replication_strategy={'publish': 1, 'local': 1}, sessionToken=null, appPrivateKey=null, apiPassword=null) {
+export function datastoreMountOrCreate(replication_strategy={}, sessionToken=null, appPrivateKey=null, apiPassword=null) {
 
    if(!sessionToken) {
       const userData = getUserData();
@@ -684,10 +684,11 @@ export function datastoreMountOrCreate(replication_strategy={'publish': 1, 'loca
    // decode
    const session = jsontokens.decodeToken(sessionToken).payload;
    const session_blockchain_id = getBlockchainIDFromSessionOrDefault(session);
+   const session_datastore_id = getSessionDatastoreID(sessionToken);
    const session_app_name = getSessionAppName(sessionToken);
 
    // cached, and not partially-failed create?
-   let ds = getCachedMountContext(session_blockchain_id, session_app_name);
+   let ds = getCachedMountContext(session_datastore_id, session_app_name);
    if (ds && !datastoreCreateIsPartialFailure(sessionToken)) {
       return new Promise((resolve, reject) => { resolve(ds); });
    }
@@ -742,7 +743,10 @@ export function datastoreMountOrCreate(replication_strategy={'publish': 1, 'loca
       allDeviceIDs.push(apk['device_id']);
    }
 
-   console.log(`Will use drivers ${drivers.join(',')}`);
+   if (drivers) {
+       console.log(`Will use drivers ${drivers.join(',')}`);
+   }
+
    console.log(`Datastore will span devices ${allDeviceIDs.join(',')}`);
 
    const datastoreOpts = {
@@ -774,6 +778,22 @@ export function datastoreMountOrCreate(replication_strategy={'publish': 1, 'loca
 
             // this create succeeded
             datastoreCreateUnsetPartialFailure(sessionToken);
+
+            // this is required for testing purposes, since the core session token will not have been set
+            let userData = getUserData();
+            if ((!userData.coreSessionToken && sessionToken) || (!userData.appPrivateKey && appPrivateKey)) {
+               console.log("\nIn test framework; saving session token\n");
+
+               if (!userData.coreSessionToken && sessionToken) {
+                   userData.coreSessionToken = sessionToken;
+               }
+
+               if (!userData.appPrivateKey && appPrivateKey) {
+                   userData.appPrivateKey = appPrivateKey;
+               }
+
+               setUserData(userData);
+            }
 
             // connect to it now
             return datastoreMount(datastoreOpts)
