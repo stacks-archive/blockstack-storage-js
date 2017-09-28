@@ -1,6 +1,6 @@
 {
   "name": "blockstack-storage",
-  "version": "0.3.0",
+  "version": "0.3.0-multi-reader-storage.alpha.1",
   "description": "The Blockstack Javascript library for storage.",
   "main": "lib/index",
   "scripts": {
