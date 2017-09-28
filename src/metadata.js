@@ -90,15 +90,15 @@ export function setGaiaLocalData(userData) {
  * Return null if not found
  * Throws on error
  */
-export function getCachedMountContext(blockchain_id, full_app_name) {
+export function getCachedMountContext(blockchain_or_datastore_id, full_app_name) {
 
    let userData = getUserData();
    assert(userData);
 
-   assert(blockchain_id, 'No blockchain ID given');
+   assert(blockchain_or_datastore_id, 'No blockchain ID given');
    assert(full_app_name, 'No app name given');
 
-   let cache_key = `${blockchain_id}/${full_app_name}`
+   let cache_key = `${blockchain_or_datastore_id}/${full_app_name}`
 
    if (!userData.datastore_contexts) {
       console.log("No datastore contexts defined");
@@ -106,13 +106,13 @@ export function getCachedMountContext(blockchain_id, full_app_name) {
    }
 
    if (!userData.datastore_contexts[cache_key]) {
-      console.log(`No datastore contexts for ${blockchain_id} in ${full_app_name}`);
+      console.log(`No datastore contexts for ${blockchain_or_datastore_id} in ${full_app_name}`);
       return null;
    }
 
    let ctx = userData.datastore_contexts[cache_key];
    if (!ctx) {
-      console.log(`Null datastore context for ${blockchain_id} in ${full_app_name}`);
+      console.log(`Null datastore context for ${blockchain_or_datastore_id} in ${full_app_name}`);
       return null;
    }
 
@@ -123,23 +123,23 @@ export function getCachedMountContext(blockchain_id, full_app_name) {
 /*
  * Cache a mount context for a blockchain ID
  *
- * @param blockchain_id (string) the blockchain ID
+ * @param blockchain_or_datastore_id (string) the blockchain ID or datastore ID
  * @param full_app_name (string) the fully-qualified application name
  * @param datastore_context (object) the datastore mount context
  */
-export function setCachedMountContext(blockchain_id, full_app_name, datastore_context) {
+export function setCachedMountContext(blockchain_or_datastore_id, full_app_name, datastore_context) {
 
    let userData = getUserData();
    assert(userData);
 
-   assert(blockchain_id, 'No blockchain ID given');
+   assert(blockchain_or_datastore_id, 'No blockchain ID given');
    assert(full_app_name, 'No app name given');
 
    if (!userData.datastore_contexts) {
       userData.datastore_contexts = {};
    }
 
-   let cache_key = `${blockchain_id}/${full_app_name}`
+   let cache_key = `${blockchain_or_datastore_id}/${full_app_name}`
    userData.datastore_contexts[cache_key] = datastore_context;
    setUserData(userData);
 }
@@ -148,22 +148,22 @@ export function setCachedMountContext(blockchain_id, full_app_name, datastore_co
 /*
  * Uncache a mount context for a blockchain ID
  *
- * @param blockchain_id (string) the blockchain ID
+ * @param blockchain_or_datastore_id (string) the blockchain ID or datastore ID
  * @param full_app_name (string) the fully-qualified application name
  */
-export function deleteCachedMountContext(blockchain_id, full_app_name) {
+export function deleteCachedMountContext(blockchain_or_datastore_id, full_app_name) {
 
    let userData = getUserData();
    assert(userData);
 
-   assert(blockchain_id, 'No blockchain ID given');
+   assert(blockchain_or_datastore_id, 'No blockchain ID given');
    assert(full_app_name, 'No app name given');
 
    if (!userData.datastore_contexts) {
       return true;
    }
 
-   let cache_key = `${blockchain_id}/${full_app_name}`
+   let cache_key = `${blockchain_or_datastore_id}/${full_app_name}`
    if (!Objects.keys(userData.datastore_contexts).includes(cache_key)) {
       return true;
    }
