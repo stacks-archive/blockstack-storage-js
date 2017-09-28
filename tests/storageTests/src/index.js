@@ -400,6 +400,7 @@ function do_unit_tests_write( blockchain_id, privkey=null, create_datastore=true
                }
 
                // make sure we can recreate it 
+               console.log("Force re-try datastore creation");
                datastoreCreateSetRetry(session_token);
                return getOrCreateDatastore({'local': 1}, session_token, datastore_privkey_hex);
            }
