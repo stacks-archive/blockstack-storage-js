@@ -102,6 +102,11 @@ function validateJSONResponse(resp, result_schema) {
 }
 
 
+function getAppDomainFromSessionToken(sessionToken) {
+
+}
+
+
 /*
  * Helper method to issue an HTTP request.
  * @param options (Object) set of HTTP request options
@@ -116,6 +121,23 @@ function httpRequest(options, result_schema, body) {
 
     if (body) {
        options['body'] = body;
+    }
+
+    // make sure we include the right Origin: header
+    if (options.headers) {
+       if (options.headers['Authorization'] && !options.headers['Origin'] && options.headers['Authorization'].startsWith('bearer ')) {
+          // possibly our session token
+          // extract the right origin and insert it if so
+          const authHeader = options.headers['Authorization'];
+          const authBearer = authHeader.slice('bearer '.length);
+          try {
+              const session = jsontokens.decodeToken(authBearer).payload;
+              options.headers['Origin'] = session.app_domain;
+          }
+          catch(e) {
+              // pass
+          }
+       }
     }
 
     const url = `http://${options.host}:${options.port}${options.path}`;
@@ -607,7 +629,7 @@ export function datastoreMount(opts) {
  */
 function getUserData() {
    let userData = localStorage.getItem(LOCAL_STORAGE_ID);
-   if (userData === null) {
+   if (!userData) {
       userData = '{}';
    }
 
@@ -902,7 +924,7 @@ export function datastoreMountOrCreate(replication_strategy={'public': 1, 'local
          return datastoreCreate( hostport, sessionToken, info )
          .then((res) => {
             if (res.error) {
-               console.log(error);
+               console.log(res.error);
                let errorNo = res.errno || 'UNKNOWN';
                let errorMsg = res.error || 'UNKNOWN';
                throw new Error(`Failed to create datastore (errno ${errorNo}): ${errorMsg}`);

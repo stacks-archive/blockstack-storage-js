@@ -39,6 +39,66 @@ const jsontokens = require('jsontokens');
 const BigInteger = require('bigi');
 const Promise = require('promise');
 
+/*
+ * Send Core a request for a session token.
+ * This duplicates the functionality of sendCoreSessionRequest(), but in a way
+ * that is compatible with the integration test framework.  In particular,
+ * it sets the Origin: header.
+ *
+ * @param coreAuthRequest (String) a signed JWT encoding the authentication request
+ * @param apiPassword (String) the API password for Core
+ *
+ * Returns a JWT signed with the Core API server's private key that authorizes the bearer
+ * to carry out the requested operations.
+ * @private
+ */
+function sendCoreSessionRequestTEST(coreHost: string,
+                                    corePort: number,
+                                    coreAuthRequest: string,
+                                    apiPassword: string) {
+
+  return new Promise((resolve, reject) => {
+    if (!apiPassword) {
+      reject('Missing API password')
+      return null
+    }
+
+    const options = {
+      headers: {
+        Authorization: `bearer ${apiPassword}`,
+        Origin: `http://localhost:${corePort}`,
+      }
+    }
+
+    const url = `http://${coreHost}:${corePort}/v1/auth?authRequest=${coreAuthRequest}`
+    console.log(`sendCoreSesionRequestTEST: Fetch ${url}`);
+
+    return fetch(url, options)
+    .then(response => {
+      if (!response.ok) {
+        reject('HTTP status not OK')
+        return null
+      }
+      return response.text()
+    })
+    .then(responseText => JSON.parse(responseText))
+    .then(responseJson => {
+      const token = responseJson.token
+      if (!token) {
+        reject('Failed to get Core session token')
+        return null
+      }
+      resolve(token)
+      return token
+    })
+    .catch(error => {
+      console.error(error)
+      reject('Invalid Core response: not JSON')
+    })
+  })
+}
+
+
 var args = process.argv.slice(2);
 var command = null;
 if( args.length == 0 ) {
@@ -284,7 +344,7 @@ else if( command == 'unittest' ) {
            console.log(`ping result: ${JSON.stringify(res)}`);
 
            var auth_request = makeAuthRequest(datastore_privkey_hex, "https://www.foo.com/login", "https://www.foo.com/manifest.json", ['store_read', 'store_write', 'store_admin'], "https://www.foo.com");
-           return getCoreSession('localhost', 16268, api_password, datastore_privkey_hex, "judecn.id", auth_request);
+           return getCoreSession('localhost', 16268, api_password, datastore_privkey_hex, "judecn.id", auth_request, '0', sendCoreSessionRequestTEST);
 
       }, (error) => {console.log(JSON.stringify(error)); process.exit(1);})
       .then((token_res) => {
