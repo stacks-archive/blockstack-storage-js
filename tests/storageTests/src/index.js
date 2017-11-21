@@ -52,10 +52,10 @@ const Promise = require('promise');
  * to carry out the requested operations.
  * @private
  */
-function sendCoreSessionRequestTEST(coreHost: string,
-                                    corePort: number,
-                                    coreAuthRequest: string,
-                                    apiPassword: string) {
+function sendCoreSessionRequestTEST(coreHost,
+                                    corePort,
+                                    coreAuthRequest,
+                                    apiPassword) {
 
   return new Promise((resolve, reject) => {
     if (!apiPassword) {
